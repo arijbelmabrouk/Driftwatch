@@ -64,24 +64,32 @@ Building the core ingestion loop: ArXiv → ChromaDB → delta report.
 
 ## Roadmap
 
-### MVP (Weeks 1–4)
+### MVP (Weeks 1–4) — Core Loop
 - [ ] ArXiv ingestion pipeline
 - [ ] Chunking + embedding into ChromaDB
 - [ ] Weekly delta comparison logic
 - [ ] LLM-generated delta report
 - [ ] Basic FastAPI + React dashboard
 
-### V1 (Weeks 5–10)
+### V1 (Weeks 5–10) — Multi-Source
 - [ ] GitHub trending repos ingestion
 - [ ] HackerNews discussions ingestion
 - [ ] Contradiction detection between papers
 - [ ] Instant alerts for CVEs and retractions
 - [ ] Email delivery of reports
 
-### V2 (Beyond)
+### V1.5 (Weeks 11–14) — Project-Aware Mode
+- [ ] Link a local GitHub repo to Driftwatch
+- [ ] Auto-detect stack from requirements.txt / package.json / README
+- [ ] Deliver recommendations scoped to your exact project context
+- [ ] Alert when a dependency has a relevant update or vulnerability
+- [ ] Suggest best papers and tools matching what you are currently building
+- [ ] Local background daemon (runs without VS Code open)
+
+### V2 (Beyond) — Intelligence Layer
 - [ ] Cross-disciplinary collision alerts
-- [ ] Innovation velocity tracking
-- [ ] Neo4j knowledge graph layer
+- [ ] Innovation velocity tracking (hype vs adoption curves)
+- [ ] Neo4j knowledge graph layer for contradiction mapping
 - [ ] Multi-user tracker management
 
 ---
@@ -100,4 +108,4 @@ pip install -r requirements.txt
 
 ## License
 
-MIT
+MIT 
