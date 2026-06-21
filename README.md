@@ -14,15 +14,17 @@ The real danger isn't the papers you read and disagree with. It's the ones you n
 
 **Pull tools** (search engines, chatbots, literature databases) only help when you already know what to look for. They can't catch what you didn't know to ask.
 
-**Driftwatch is a push tool.** You register a topic once. It watches forever. Every week it delivers one report: *what actually changed.*
+**Driftwatch is a push tool.** You register a topic once. It watches forever. At your chosen frequency it delivers one report: *what actually changed.*
 
 ---
 
 ## How It Works
 
 1. **Register a tracker** — describe your topic in plain language. Driftwatch auto-formats it into a precise ArXiv query behind the scenes. No query syntax required.
-2. **It runs on a schedule** — every week, it ingests new papers from ArXiv (and later GitHub and HackerNews), chunks and embeds them, and stores them in a local vector database stamped with that week's identifier.
-3. **You get a delta report** — not a summary of everything known, a diff of what changed: what's genuinely new, what's incremental, what's actively contested, and what gap nobody has answered yet.
+2. **Choose your frequency** — daily, weekly, biweekly, or monthly. The system runs on your schedule, not its own. Current implementation defaults to weekly; configurable frequency per tracker is on the roadmap.
+3. **Choose your report mode** — weekly summary (what's happening this period), delta report (what changed since last period), or both.
+4. **It runs autonomously** — every period it ingests new papers from ArXiv (and later GitHub and HackerNews), chunks and embeds them, and stores them in a local vector database stamped with that period's identifier.
+5. **You get a report** — grounded in real sources, saved to disk, never hallucinated.
 
 ---
 
@@ -32,12 +34,12 @@ Every individual piece of this system exists somewhere. The combination doesn't.
 
 | Feature | Exists elsewhere? |
 |---|---|
-| Fetch papers automatically | ✅ trivially |
-| Summarize papers with LLM | ✅ everywhere |
-| Detect contradictions | ✅ partially (PaperQA2) |
+| Fetch papers automatically | trivially |
+| Summarize papers with LLM | everywhere |
+| Detect contradictions | partially (PaperQA2) |
 | Track GitHub + forums + papers together | ❌ |
-| Persistent memory across weeks | ❌ |
-| Delta report — what changed vs last week | ❌ |
+| Persistent memory across periods | ❌ |
+| Delta report — what changed vs last period | ❌ |
 | Push-based, zero user input after setup | ❌ |
 | Cross-disciplinary collision detection | ❌ |
 
@@ -45,10 +47,26 @@ The combination is the innovation.
 
 ---
 
+## Report Types
+
+### Weekly Summary
+Answers: *"what are papers saying about X this period?"*
+
+Four sections: MAIN THEME · NOTABLE FINDINGS · CONTESTED · OPEN GAP
+
+### Delta Report
+Answers: *"what changed about X compared to last period?"*
+
+Four sections: NEW THIS WEEK · STILL ACTIVE · FADING OUT · EMERGING DISPUTE
+
+The delta report is what makes Driftwatch unique. It requires at least two periods of stored data and uses set comparison across ChromaDB to categorize every paper as new, continuing, or dropped — before passing that structured context to the LLM.
+
+---
+
 ## Architecture
 
 ```
-User types plain topic
+User types plain topic + chooses frequency + chooses report mode
         ↓
 auto-format → ArXiv query (cat:cs.LG AND abs:"topic")
         ↓
@@ -58,13 +76,15 @@ RecursiveCharacterTextSplitter → chunks (~500 chars, 50 overlap)
         ↓
 sentence-transformers all-MiniLM-L6-v2 → 384-dim embeddings (local)
         ↓
-ChromaDB (persistent, cosine similarity) ← stamped with ISO week
+ChromaDB (persistent, cosine similarity) ← stamped with ISO period identifier
         ↓
-similarity search → top 10 chunks retrieved
+        ├── [Summary mode]  similarity search → top 10 chunks → Groq LLM → summary report
+        └── [Delta mode]    fetch current + previous period chunks
+                            → set comparison (new / continuing / dropped)
+                            → Groq LLM → delta report
+                            → saved to disk (JSON + .txt)
         ↓
-Groq LLM (free) → delta report generated (~3,300 tokens total)
-        ↓
-Dashboard / terminal output
+Terminal output / Dashboard (Phase 4)
 ```
 
 Everything runs locally. No cloud database. No paid APIs. No subscription.
@@ -77,7 +97,7 @@ Everything runs locally. No cloud database. No paid APIs. No subscription.
 
 **Why not fixed-size?** Fixed-size splits by word count and cuts mid-sentence, breaking semantic meaning at boundaries.
 
-**Why not semantic chunker?** Semantic chunking uses embeddings to find meaning boundaries — more intelligent, but 3-4x slower. Unnecessary for weekly batch processing.
+**Why not semantic chunker?** Semantic chunking uses embeddings to find meaning boundaries — more intelligent, but 3-4x slower. Unnecessary for batch processing.
 
 **Why Recursive?** It tries to split in priority order: paragraphs → sentences → words → characters. For clean ArXiv abstracts it splits on sentences. For messy GitHub READMEs or HackerNews threads it falls back gracefully. Same chunker handles all future sources without modification.
 
@@ -87,13 +107,13 @@ Settings: `chunk_size=500` characters (~80-100 words), `chunk_overlap=50` charac
 
 ### Embeddings — sentence-transformers / all-MiniLM-L6-v2
 
-**Why not Ollama?** Ollama requires a running server as a separate background process — extra infrastructure, extra failure point, unnecessary for embeddings.
+**Why not Ollama?** Requires a running server as a separate background process — extra infrastructure, extra failure point, unnecessary for embeddings.
 
 **Why not OpenAI embeddings?** Costs money per token. Violates the free-and-local requirement.
 
 **Why sentence-transformers?** Runs as a Python library import, no server, no API key, no cost. Fully local.
 
-**Why all-MiniLM-L6-v2?** Produces 384-dimensional vectors. 80MB model size. Fast on CPU. The alternative (`all-mpnet-base-v2`) gives 768 dimensions and higher quality but is 2x slower and 4x larger — negligible quality difference at this scale doesn't justify the tradeoff.
+**Why all-MiniLM-L6-v2?** 384-dimensional vectors, 80MB model, fast on CPU. The alternative (`all-mpnet-base-v2`) gives 768 dimensions and better quality but is 2x slower and 4x larger — negligible quality difference at this scale.
 
 ---
 
@@ -107,7 +127,7 @@ Settings: `chunk_size=500` characters (~80-100 words), `chunk_overlap=50` charac
 
 **Why ChromaDB?** Pure Python library — `pip install chromadb`, nothing else. Writes to a local folder. Runs in-process. Handles millions of chunks on a laptop. One year of one tracker's data is under 40MB.
 
-**Why cosine similarity, not L2 or inner product?** L2 (euclidean distance) measures both direction and magnitude. For text, a short abstract and a long paper on the same topic have different magnitudes — L2 penalizes length differences unfairly. Inner product has similar issues. Cosine similarity measures only the angle between vectors, ignoring magnitude entirely. Two texts that mean the same thing point in the same direction regardless of their length. Correct measure for semantic text search.
+**Why cosine similarity, not L2 or inner product?** L2 measures both direction and magnitude — penalizes length differences between short abstracts and long papers unfairly. Cosine similarity measures only the angle between vectors, ignoring magnitude. Two texts that mean the same thing point in the same direction regardless of length. Standard choice for semantic text search.
 
 ---
 
@@ -115,27 +135,59 @@ Settings: `chunk_size=500` characters (~80-100 words), `chunk_overlap=50` charac
 
 **Why not OpenAI?** Costs money.
 
-**Why not Ollama locally?** Viable option, but Groq's free tier is faster (runs on dedicated hardware) and simpler to set up for the LLM layer. Ollama remains a fallback for fully offline use.
+**Why not Ollama locally?** Viable fallback, but Groq's free tier is faster (dedicated hardware) and simpler to set up.
 
-**Why Groq specifically?** Free tier gives 14,400 tokens/minute. One delta report costs ~3,300 tokens. That's 4 reports per minute for free — more than enough for a weekly scheduler.
+**Why Groq specifically?** Free tier gives 14,400 tokens/minute. One report costs ~3,300 tokens total — more than enough for any reasonable report frequency.
 
 Token budget per report:
-- 10 retrieved chunks × ~200 tokens each = ~2,000 tokens
+- 10 retrieved chunks × ~200 tokens = ~2,000 tokens input
 - System prompt + instructions = ~500 tokens
-- LLM response (the report) = ~800 tokens
+- LLM response = ~800 tokens
 - **Total: ~3,300 tokens per report**
+
+**Model: `llama-3.1-8b-instant`** — fast, free, 131k context window. Sufficient for summarization and comparison tasks. Swappable to `llama-3.3-70b-versatile` in one line for higher quality.
+
+**Temperature: 0.2** — low, near-deterministic. Reports should be consistent and factual, not creative.
+
+---
+
+### Prompt Design — Six-Component Structure
+
+Both prompts (summary and delta) follow a strict structure: **Role · Task · Context · Reasoning · Stop Conditions · Output**.
+
+The reasoning section is the most important — it tells the LLM to think through each section before writing, which produces more accurate output than asking it to write directly. Stop conditions explicitly ban filler phrases and hallucination. Output format is fixed so reports are consistent across every run.
+
+---
+
+### Report Frequency — User-Configurable
+
+The period identifier stamped on every chunk (`2026-W25` for weekly, `2026-06-21` for daily, `2026-06` for monthly) is the only thing that changes between frequency modes. The delta logic compares period N vs period N-1 regardless of what the period unit is. Current implementation uses weekly periods. Per-tracker configurable frequency (daily / weekly / biweekly / monthly) is a Phase 4 tracker config feature.
+
+---
+
+### Delta Logic — Set Comparison
+
+The delta pipeline fetches chunks from two periods out of ChromaDB and runs set operations on paper titles:
+
+- **New** = titles in current period − titles in previous period
+- **Continuing** = titles in current period ∩ titles in previous period  
+- **Dropped** = titles in previous period − titles in current period
+
+This structured categorization is passed to the LLM as context, along with both weeks' full chunk text. The LLM never has to figure out what's new — the comparator already did that. The LLM only has to describe what it means.
+
+Reports are saved to disk as both JSON (for the dashboard) and `.txt` (for human reading) under `data/reports/{topic}/{period_current}_vs_{period_previous}/`.
 
 ---
 
 ### Data Source — ArXiv API
 
-**Why ArXiv first?** Free, no API key required, well-documented Python library, returns structured data (title, abstract, date, ID). Ideal for validating the pipeline before adding messier sources.
+**Why ArXiv first?** Free, no key required, structured data, well-documented Python library. Best source for validating the pipeline before adding messier sources.
 
-**Query format:** `cat:cs.LG AND abs:"topic"` — category filter ensures ML/CS papers only, abstract filter ensures topic relevance. Plain English input is auto-converted to this format by `build_arxiv_query()` in `main.py`.
+**Query format:** `cat:cs.LG AND abs:"topic"` — category filter (cs.LG = Machine Learning) plus abstract phrase match. Plain English input auto-converted by `build_arxiv_query()` in `main.py`.
 
-**Date stamping:** Uses `result.updated.date()` rather than `result.published.date()` — more reliable for weekly filtering since `updated` reflects when the paper actually appeared on ArXiv.
+**Date field:** `result.updated.date()` — more reliable than `published` for weekly filtering since it reflects when the paper actually appeared on ArXiv.
 
-**Week identifier:** Every document and chunk is stamped with an ISO week string (`2026-W25`). This is the critical metadata field that makes the delta comparison possible — ChromaDB filters by this field to retrieve "this week only" vs "last week only" for comparison.
+**Period stamp:** Every chunk carries an ISO week string (`2026-W25`). This is the metadata field ChromaDB filters on to retrieve "this period only" vs "last period only."
 
 ---
 
@@ -143,18 +195,25 @@ Token budget per report:
 
 ```
 Driftwatch/
-├── main.py                    ← interactive entry point, full pipeline
+├── main.py                        ← interactive entry point, mode selection
 ├── ingestion/
-│   └── arxiv_fetcher.py       ← fetches papers from ArXiv, week-stamps each one
+│   └── arxiv_fetcher.py           ← fetches papers, stamps with period identifier
 ├── processing/
-│   └── chunker_embedder.py    ← chunks text, embeds into 384-dim vectors
+│   └── chunker_embedder.py        ← recursive chunking + local embeddings
 ├── storage/
-│   └── vector_store.py        ← saves to ChromaDB, queries by topic + week
-├── rag/                       ← Week 2: retrieval + LLM generation
-├── delta/                     ← Week 3: week-over-week comparison logic
-├── api/                       ← Week 4: FastAPI backend
-├── dashboard/                 ← Week 4: React frontend
-├── data/                      ← ChromaDB lives here (gitignored)
+│   └── vector_store.py            ← ChromaDB save + query by topic/period
+├── rag/
+│   ├── prompt_builder.py          ← assembles summary prompt (6-component structure)
+│   └── llm_caller.py              ← sends to Groq, returns report string
+├── delta/
+│   ├── comparator.py              ← fetches two periods, set comparison logic
+│   ├── delta_prompt.py            ← assembles delta prompt (6-component structure)
+│   └── report.py                  ← saves reports to disk as JSON + .txt
+├── scripts/
+│   └── seed_week.py               ← dev utility: seed a fake previous period for testing
+├── api/                           ← Phase 4: FastAPI backend
+├── dashboard/                     ← Phase 4: React frontend
+├── data/                          ← ChromaDB + saved reports (gitignored)
 ├── requirements.txt
 └── .gitignore
 ```
@@ -166,57 +225,71 @@ Driftwatch/
 | Layer | Technology | Why |
 |---|---|---|
 | Ingestion | ArXiv API | Free, no key, structured data |
-| Chunking | LangChain RecursiveCharacterTextSplitter | Handles all source types (papers, READMEs, threads) |
+| Chunking | LangChain RecursiveCharacterTextSplitter | Handles all source types |
 | Embeddings | sentence-transformers all-MiniLM-L6-v2 | Local, free, fast on CPU |
 | Vector store | ChromaDB (persistent, cosine) | Local, no server, Python-native |
-| LLM | Groq API (free tier) | Free, fast, ~3,300 tokens per report |
-| Orchestration | LangGraph | Stateful multi-step agentic pipeline |
-| Scheduler | APScheduler | Weekly cron, zero manual input |
-| Data sources | ArXiv · GitHub API · HackerNews Firebase | All free, no key required for ArXiv/HN |
-| Backend | FastAPI | Lightweight, async |
-| Frontend | React + D3.js | Dashboard + contradiction graph visualization |
+| LLM | Groq API — llama-3.1-8b-instant | Free, fast, 131k context |
+| Delta logic | Set comparison + structured prompting | Period N vs N-1, any frequency |
+| Report storage | JSON + .txt on disk | Persistent, dashboard-ready |
+| Orchestration | LangGraph (upcoming) | Stateful multi-step agentic pipeline |
+| Scheduler | APScheduler (upcoming) | Runs at user-chosen frequency |
+| Data sources (upcoming) | GitHub API · HackerNews Firebase | All free |
+| Backend (upcoming) | FastAPI | Lightweight, async |
+| Frontend (upcoming) | React + D3.js | Dashboard + visualization |
 
-100% free and open source. No paid APIs required to run the full system.
+100% free and open source. No paid APIs required.
 
 ---
 
 ## Project Status
 
-🚧 **Active development — Week 2**
+**Phase 1 complete** — Ingestion pipeline
+- ArXiv fetcher with ISO period stamping
+- RecursiveCharacterTextSplitter + sentence-transformers embeddings
+- ChromaDB persistent storage with cosine similarity
+- Interactive `main.py` connecting all three
 
-Week 1 complete: full ingestion pipeline working end-to-end.
-- ArXiv fetcher with ISO week stamping ✅
-- RecursiveCharacterTextSplitter + sentence-transformers embeddings ✅
-- ChromaDB persistent storage with cosine similarity ✅
-- Interactive `main.py` connecting all three ✅
+**Phase 2 complete** — RAG layer
+- Groq LLM integration (llama-3.1-8b-instant)
+- Six-component prompt design
+- Weekly summary report generation
 
-Now building: RAG layer — Groq LLM integration and delta report generation.
+**Phase 3 complete** — Delta logic
+- Period comparator (set comparison: new / continuing / dropped)
+- Delta prompt builder with temporal movement framing
+- Report persistence to disk (JSON + .txt)
+- Two report modes: summary and delta
+
+**Phase 4 in progress** — FastAPI backend + React dashboard
 
 ---
 
 ## Roadmap
 
-### MVP (Weeks 1–4) — Core Loop
-- [x] ArXiv ingestion pipeline with week stamping
-- [x] Chunking (recursive) + embedding (local) into ChromaDB
-- [ ] RAG layer — Groq LLM integration, basic summary generation
-- [ ] Weekly delta comparison logic (W25 vs W24)
-- [ ] LLM-generated structured delta report
-- [ ] Basic FastAPI + React dashboard
+### MVP (Phases 1–4) — Core Loop
+- [x] ArXiv ingestion pipeline with period stamping
+- [x] Recursive chunking + local embeddings into ChromaDB
+- [x] RAG layer — Groq LLM, summary report generation
+- [x] Delta comparison logic — what changed between periods
+- [x] LLM-generated delta report with temporal movement framing
+- [x] Report persistence to disk
+- [ ] FastAPI backend
+- [ ] React dashboard with tracker cards and report viewer
 
-### V1 (Weeks 5–10) — Multi-Source
+### V1 (Phases 5–10) — Multi-Source + Automation
+- [ ] Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
 - [ ] GitHub trending repos ingestion (READMEs, changelogs, star velocity)
 - [ ] HackerNews discussions ingestion (Firebase API)
 - [ ] Contradiction detection between papers
 - [ ] Instant alerts for CVEs and retractions
 - [ ] Email delivery of reports
-- [ ] APScheduler daemon (runs weekly, zero user input)
+- [ ] APScheduler daemon (runs at user-chosen frequency, zero manual input)
 
-### V1.5 (Weeks 11–14) — Project-Aware Mode
+### V1.5 (Phases 11–14) — Project-Aware Mode
 - [ ] VS Code extension — detects open project folder
 - [ ] Auto-extract stack from requirements.txt / package.json / README
-- [ ] Confirmation prompt before creating tracker automatically
-- [ ] Deliver recommendations scoped to your exact project context
+- [ ] Confirmation prompt before auto-creating tracker
+- [ ] Recommendations scoped to your exact project context
 - [ ] Alert when a dependency has a relevant update or vulnerability
 - [ ] Local background daemon (auto-starts on machine boot)
 
@@ -240,7 +313,12 @@ pip install -r requirements.txt
 python main.py
 ```
 
-> Groq API key required for Week 2+ features. Get one free at console.groq.com.
+Create a `.env` file at the project root:
+```
+GROQ_API_KEY=your_key_here
+```
+
+Get a free Groq API key at [console.groq.com](https://console.groq.com) — no credit card required.
 
 ---
 
