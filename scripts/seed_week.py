@@ -35,11 +35,11 @@ W24_PAPERS = [
             "saturation effects and provides more accurate predictions of downstream task performance."
         ),
         "url": "https://arxiv.org/abs/seed_w24_001",
-        "published": "2026-06-09",
+        "published": "2026-06-28",
         "authors": ["J. Martinez", "S. Kim", "R. Patel"],
         "topic": 'cat:cs.LG AND abs:"large language models"',
         "source": "arxiv",
-        "week": "2026-W24"
+        "week": "2026-W26"
     },
     {
         "paper_id": "seed_w24_002",
@@ -55,11 +55,11 @@ W24_PAPERS = [
             "fundamentally different approaches to reasoning improvement."
         ),
         "url": "https://arxiv.org/abs/seed_w24_002",
-        "published": "2026-06-10",
+        "published": "2026-06-22",
         "authors": ["A. Chen", "B. Williams", "C. Lopez"],
         "topic": 'cat:cs.LG AND abs:"large language models"',
         "source": "arxiv",
-        "week": "2026-W24"
+        "week": "2026-W26"
     },
     {
         "paper_id": "seed_w24_003",
@@ -75,11 +75,11 @@ W24_PAPERS = [
             "alignment degradation before deployment."
         ),
         "url": "https://arxiv.org/abs/seed_w24_003",
-        "published": "2026-06-10",
+        "published": "2026-06-23",
         "authors": ["D. Thompson", "E. Garcia", "F. Brown"],
         "topic": 'cat:cs.LG AND abs:"large language models"',
         "source": "arxiv",
-        "week": "2026-W24"
+        "week": "2026-W26"
     },
     {
         "paper_id": "seed_w24_004",
@@ -94,11 +94,11 @@ W24_PAPERS = [
             "We release a benchmark suite for standardized RAG chunking evaluation."
         ),
         "url": "https://arxiv.org/abs/seed_w24_004",
-        "published": "2026-06-11",
+        "published": "2026-06-24",
         "authors": ["G. Wilson", "H. Lee", "I. Anderson"],
         "topic": 'cat:cs.LG AND abs:"large language models"',
         "source": "arxiv",
-        "week": "2026-W24"
+        "week": "2026-W26"
     },
     {
         "paper_id": "seed_w24_005",
@@ -114,11 +114,11 @@ W24_PAPERS = [
             "reduction."
         ),
         "url": "https://arxiv.org/abs/seed_w24_005",
-        "published": "2026-06-11",
+        "published": "2026-06-25",
         "authors": ["J. Taylor", "K. Moore", "L. Jackson"],
         "topic": 'cat:cs.LG AND abs:"large language models"',
         "source": "arxiv",
-        "week": "2026-W24"
+        "week": "2026-W26"
     },
     {
         "paper_id": "seed_w24_006",
@@ -134,11 +134,11 @@ W24_PAPERS = [
             "compared to full fine-tuning."
         ),
         "url": "https://arxiv.org/abs/seed_w24_006",
-        "published": "2026-06-12",
+        "published": "2026-06-26",
         "authors": ["M. Harris", "N. Clark", "O. Lewis"],
         "topic": 'cat:cs.LG AND abs:"large language models"',
         "source": "arxiv",
-        "week": "2026-W24"
+        "week": "2026-W26"
     },
     {
         "paper_id": "seed_w24_007",
@@ -154,11 +154,11 @@ W24_PAPERS = [
             "not eliminate it."
         ),
         "url": "https://arxiv.org/abs/seed_w24_007",
-        "published": "2026-06-12",
+        "published": "2026-06-27",
         "authors": ["P. Robinson", "Q. Walker", "R. Young"],
         "topic": 'cat:cs.LG AND abs:"large language models"',
         "source": "arxiv",
-        "week": "2026-W24"
+        "week": "2026-W26"
     },
 ]
 
@@ -178,7 +178,7 @@ def seed_w24():
     print(f"Saved {saved} chunks")
     print(f"Total chunks in DB: {stats['total_chunks']}")
     print(f"\nW24 seeded successfully.")
-    print("You can now run the delta pipeline comparing W24 vs W25.")
+    print("You can now run the delta pipeline comparing W25 vs W26.")
 
 
 if __name__ == "__main__":
