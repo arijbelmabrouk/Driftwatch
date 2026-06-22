@@ -37,11 +37,11 @@ Every individual piece of this system exists somewhere. The combination doesn't.
 | Fetch papers automatically | trivially |
 | Summarize papers with LLM | everywhere |
 | Detect contradictions | partially (PaperQA2) |
-| Track GitHub + forums + papers together | ❌ |
-| Persistent memory across periods | ❌ |
-| Delta report — what changed vs last period | ❌ |
-| Push-based, zero user input after setup | ❌ |
-| Cross-disciplinary collision detection | ❌ |
+| Track GitHub + forums + papers together | no |
+| Persistent memory across periods | no |
+| Delta report — what changed vs last period | no |
+| Push-based, zero user input after setup | no |
+| Cross-disciplinary collision detection | no |
 
 The combination is the innovation.
 
@@ -84,7 +84,7 @@ ChromaDB (persistent, cosine similarity) ← stamped with ISO period identifier
                             → Groq LLM → delta report
                             → saved to disk (JSON + .txt)
         ↓
-Terminal output / Dashboard (Phase 4)
+FastAPI backend → React dashboard
 ```
 
 Everything runs locally. No cloud database. No paid APIs. No subscription.
@@ -161,7 +161,7 @@ The reasoning section is the most important — it tells the LLM to think throug
 
 ### Report Frequency — User-Configurable
 
-The period identifier stamped on every chunk (`2026-W25` for weekly, `2026-06-21` for daily, `2026-06` for monthly) is the only thing that changes between frequency modes. The delta logic compares period N vs period N-1 regardless of what the period unit is. Current implementation uses weekly periods. Per-tracker configurable frequency (daily / weekly / biweekly / monthly) is a Phase 4 tracker config feature.
+The period identifier stamped on every chunk (`2026-W25` for weekly, `2026-06-21` for daily, `2026-06` for monthly) is the only thing that changes between frequency modes. The delta logic compares period N vs period N-1 regardless of what the period unit is. Current implementation uses weekly periods. Per-tracker configurable frequency (daily / weekly / biweekly / monthly) is a V1 feature.
 
 ---
 
@@ -170,12 +170,24 @@ The period identifier stamped on every chunk (`2026-W25` for weekly, `2026-06-21
 The delta pipeline fetches chunks from two periods out of ChromaDB and runs set operations on paper titles:
 
 - **New** = titles in current period − titles in previous period
-- **Continuing** = titles in current period ∩ titles in previous period  
+- **Continuing** = titles in current period ∩ titles in previous period
 - **Dropped** = titles in previous period − titles in current period
 
-This structured categorization is passed to the LLM as context, along with both weeks' full chunk text. The LLM never has to figure out what's new — the comparator already did that. The LLM only has to describe what it means.
+This structured categorization is passed to the LLM as context, along with both periods' full chunk text. The LLM never has to figure out what's new — the comparator already did that. The LLM only has to describe what it means.
 
 Reports are saved to disk as both JSON (for the dashboard) and `.txt` (for human reading) under `data/reports/{topic}/{period_current}_vs_{period_previous}/`.
+
+---
+
+### Backend — FastAPI
+
+Thin API layer between the React dashboard and the Python pipeline. Five endpoints: list trackers, create tracker, run tracker, get latest report, ask a question scoped to a report. Tracker configs stored as JSON files in `data/trackers/`. No database required.
+
+---
+
+### Frontend — React + Vite
+
+Single-page dashboard. Tracker cards grid, delta report panel, ask bar scoped to the selected report. All API calls centralized in `api.js` — components never call `fetch()` directly. Dark theme matching the design mockup.
 
 ---
 
@@ -209,10 +221,15 @@ Driftwatch/
 │   ├── comparator.py              ← fetches two periods, set comparison logic
 │   ├── delta_prompt.py            ← assembles delta prompt (6-component structure)
 │   └── report.py                  ← saves reports to disk as JSON + .txt
+├── api/
+│   └── main.py                    ← FastAPI backend, all endpoints
+├── dashboard/                     ← React + Vite frontend
+│   └── src/
+│       ├── App.jsx                ← main app, state management
+│       ├── api.js                 ← all fetch() calls in one place
+│       └── components/            ← Sidebar, TrackerCard, ReportPanel, NewTrackerModal
 ├── scripts/
 │   └── seed_week.py               ← dev utility: seed a fake previous period for testing
-├── api/                           ← Phase 4: FastAPI backend
-├── dashboard/                     ← Phase 4: React frontend
 ├── data/                          ← ChromaDB + saved reports (gitignored)
 ├── requirements.txt
 └── .gitignore
@@ -231,11 +248,11 @@ Driftwatch/
 | LLM | Groq API — llama-3.1-8b-instant | Free, fast, 131k context |
 | Delta logic | Set comparison + structured prompting | Period N vs N-1, any frequency |
 | Report storage | JSON + .txt on disk | Persistent, dashboard-ready |
+| Backend | FastAPI + uvicorn | Lightweight, async, auto-docs |
+| Frontend | React + Vite | Fast dev server, component-based |
 | Orchestration | LangGraph (upcoming) | Stateful multi-step agentic pipeline |
 | Scheduler | APScheduler (upcoming) | Runs at user-chosen frequency |
 | Data sources (upcoming) | GitHub API · HackerNews Firebase | All free |
-| Backend (upcoming) | FastAPI | Lightweight, async |
-| Frontend (upcoming) | React + D3.js | Dashboard + visualization |
 
 100% free and open source. No paid APIs required.
 
@@ -260,7 +277,11 @@ Driftwatch/
 - Report persistence to disk (JSON + .txt)
 - Two report modes: summary and delta
 
-**Phase 4 in progress** — FastAPI backend + React dashboard
+**Phase 4 complete** — FastAPI backend + React dashboard
+- FastAPI backend with five endpoints
+- React dashboard with tracker cards, report panel, ask bar
+- Full pipeline triggerable from the browser
+- Scoped Q&A on any report via Groq
 
 ---
 
@@ -273,8 +294,8 @@ Driftwatch/
 - [x] Delta comparison logic — what changed between periods
 - [x] LLM-generated delta report with temporal movement framing
 - [x] Report persistence to disk
-- [ ] FastAPI backend
-- [ ] React dashboard with tracker cards and report viewer
+- [x] FastAPI backend
+- [x] React dashboard with tracker cards, report viewer, ask bar
 
 ### V1 (Phases 5–10) — Multi-Source + Automation
 - [ ] Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
@@ -310,13 +331,26 @@ python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Mac/Linux
 pip install -r requirements.txt
-python main.py
 ```
 
 Create a `.env` file at the project root:
 ```
 GROQ_API_KEY=your_key_here
 ```
+
+Start the backend:
+```bash
+uvicorn api.main:app --reload --port 8000
+```
+
+Start the dashboard (separate terminal):
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` in your browser.
 
 Get a free Groq API key at [console.groq.com](https://console.groq.com) — no credit card required.
 
