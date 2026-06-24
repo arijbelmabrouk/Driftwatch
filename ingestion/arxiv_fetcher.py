@@ -34,7 +34,7 @@ def get_iso_week(weeks_ago: int = 0) -> str:
 
 def fetch_papers(
     topic: str,
-    max_results: int = 50,
+    max_results: int = 500,
     weeks_ago: int = 0
 ) -> list[dict]:
     """
