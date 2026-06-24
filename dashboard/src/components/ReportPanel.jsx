@@ -1,5 +1,5 @@
 // components/ReportPanel.jsx
-import { useState } from "react";
+import { useState, useEffect} from "react";
 import { runTracker, getLatestReport, askAboutReport } from "../api";
 
 export default function ReportPanel({ tracker, onTrackerUpdated }) {
@@ -11,9 +11,9 @@ export default function ReportPanel({ tracker, onTrackerUpdated }) {
   const [error, setError]         = useState("");
 
   // Load saved report on mount / tracker change
-  useState(() => {
-    if (!tracker) return;
-    getLatestReport(tracker.id).then(setReport).catch(() => setReport(null));
+  useEffect(() => {
+      if (!tracker) return;
+      getLatestReport(tracker.id).then(setReport).catch(() => setReport(null));
   }, [tracker?.id]);
 
   async function handleRun() {

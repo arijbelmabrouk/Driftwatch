@@ -78,9 +78,9 @@ def save_report(
         "generated_at":  datetime.datetime.now().isoformat(),
         "report":        report_text,
         "metadata": {
-            "new_papers":        len(set(c["title"] for c in context["new"]))        if context else 0,
-            "continuing_papers": len(set(c["title"] for c in context["continuing"])) if context else 0,
-            "dropped_papers":    len(set(c["title"] for c in context["dropped"]))    if context else 0,
+            "new_papers":        len(set(c["title"] for c in context["new"]))        if context and "new" in context else 0,
+            "continuing_papers": len(set(c["title"] for c in context["continuing"])) if context and "continuing" in context else 0,
+            "dropped_papers":    len(set(c["title"] for c in context["dropped"]))    if context and "dropped" in context else 0,
         }
     }
 

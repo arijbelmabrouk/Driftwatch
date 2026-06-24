@@ -6,6 +6,7 @@ export default function NewTrackerModal({ onClose, onCreated }) {
   const [frequency, setFrequency]   = useState("weekly");
   const [mode, setMode]             = useState("both");
   const [maxResults, setMaxResults] = useState(20);
+  const [nResults, setNResults]     = useState(10);   // ← new
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState("");
 
@@ -22,6 +23,7 @@ export default function NewTrackerModal({ onClose, onCreated }) {
         frequency:   frequency,
         report_mode: mode,
         max_results: parseInt(maxResults),
+        n_results:   parseInt(nResults),   // ← new
       });
       onCreated();
     } catch {
@@ -82,6 +84,23 @@ export default function NewTrackerModal({ onClose, onCreated }) {
               value={maxResults}
               onChange={(e) => setMaxResults(e.target.value)}
             />
+            <div style={styles.hint}>
+              How many papers to fetch from ArXiv each run.
+            </div>
+          </Field>
+
+          <Field label="Chunks retrieved per report">
+            <input
+              style={{ ...styles.input, width: 80 }}
+              type="number"
+              min={5}
+              max={20}
+              value={nResults}
+              onChange={(e) => setNResults(e.target.value)}
+            />
+            <div style={styles.hint}>
+              How many chunks the LLM reads to generate the report (default: 10).
+            </div>
           </Field>
 
           {error && <div style={styles.error}>{error}</div>}

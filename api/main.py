@@ -67,6 +67,7 @@ class CreateTrackerRequest(BaseModel):
     frequency: str = "weekly"           # daily / weekly / biweekly / monthly
     report_mode: str = "both"           # summary / delta / both
     max_results: int = 20               # papers per run
+    n_results: Optional[int] = 10         # chunks per week (for summary/delta)
 
 class AskRequest(BaseModel):
     question: str                       # user's question about the report
@@ -134,6 +135,7 @@ def create_tracker(body: CreateTrackerRequest):
         "last_week":    None,
         "status":       "idle",          # idle / running / error
         "signal_count": 0,
+        "n_results":    body.n_results,
     }
 
     _save_tracker(tracker)
@@ -198,7 +200,7 @@ def run_tracker(tracker_id: str):
 
         # Step 2 — Summary report
         if mode in ("summary", "both"):
-            retrieved = query_chunks(query_text=topic, week=week_current, n_results=10)
+            retrieved = query_chunks(query_text=topic, week=week_current, n_results=tracker["n_results"])
             if retrieved:
                 messages      = build_messages(topic=topic, week=week_current, chunks=retrieved)
                 summary_text  = generate_report(messages)
@@ -210,7 +212,7 @@ def run_tracker(tracker_id: str):
                 topic=topic,
                 week_current=week_current,
                 week_previous=week_previous,
-                n_results=10
+                n_results=tracker["n_results"]
             )
             if context["has_data"]:
                 messages    = build_delta_messages(context)
