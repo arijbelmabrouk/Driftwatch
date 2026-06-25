@@ -41,7 +41,7 @@ export async function getLatestReport(trackerId) {
   const res = await fetch(`${BASE}/trackers/${trackerId}/report`);
   if (res.status === 404) return null;
   const data = await res.json();
-  return data.report;
+  return data;
 }
 
 // ── Ask bar ───────────────────────────────────────────────────────────────────

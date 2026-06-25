@@ -63,7 +63,7 @@ def _smart_n_results() -> int:
     """
     try:
         total = collection.count()
-        return min(50, total) if total > 0 else 10
+        return min(15, total) if total > 0 else 10
     except Exception:
         return 10
 

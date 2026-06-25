@@ -25,7 +25,8 @@ from rag.prompt_builder import build_messages
 from rag.llm_caller import generate_report
 from delta.comparator import prepare_delta_context
 from delta.delta_prompt import build_delta_messages
-from delta.report import save_report
+import time
+from delta.report import save_report, save_summary
 
 
 logging.basicConfig(
@@ -132,14 +133,9 @@ def run_pipeline(tracker: dict):
                 messages = build_messages(topic, week_label, retrieved)
                 summary  = generate_report(messages)
 
-                # Fix: summary has no previous period so save separately,
-                # not via save_report which expects two periods
-                summary_path = REPORTS_DIR / _slugify(topic) / f"{week_label}_summary"
-                summary_path.mkdir(parents=True, exist_ok=True)
-                with open(summary_path / "report.txt", "w", encoding="utf-8") as f:
-                    f.write(summary)
-
+                save_summary(topic=topic, week_current=week_label, report_text=summary)
                 log.info("Summary report saved.")
+                time.sleep(3)  # avoid Groq 429 when both summary and delta run back to back
 
         # Step 5 — Delta report
         if report_mode in ("delta", "both"):
@@ -190,7 +186,12 @@ def main():
     log.info("Driftwatch daemon starting...")
 
     scheduler = BlockingScheduler()
-    scheduler.add_job(check_and_run, trigger="interval", hours=1, id="check_trackers")
+    scheduler.add_job(
+        check_and_run, 
+        trigger="interval", 
+        hours=1, 
+        id="check_trackers"
+    )
 
     log.info("Running initial check...")
     check_and_run()
