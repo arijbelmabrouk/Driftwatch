@@ -384,7 +384,7 @@ Start the daemon (separate terminal, optional — runs pipelines automatically):
 python scheduler/daemon.py
 ```
 
-Open `http://localhost:5173` in your browser.
+Open `http://localhost:5173` in your browser
 
 Get a free Groq API key at [console.groq.com](https://console.groq.com) — no credit card required.
 

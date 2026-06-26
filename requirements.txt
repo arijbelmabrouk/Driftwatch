@@ -12,12 +12,12 @@ chromadb
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 groq
-langchain-groq
-pyton-dotenv
+python-dotenv
 
 # ── Backend ───────────────────────────────────────────────────────────────────
 fastapi
 uvicorn
+python-multipart
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 apscheduler
