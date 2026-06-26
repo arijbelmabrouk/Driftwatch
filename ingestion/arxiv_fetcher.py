@@ -32,10 +32,76 @@ def get_iso_week(weeks_ago: int = 0) -> str:
     return f"{year}-W{week:02d}"
 
 
+def get_period_label(frequency: str = "weekly") -> str:
+    """Return the current period label for a tracker frequency."""
+    frequency = frequency.lower()
+    today = datetime.date.today()
+
+    if frequency == "daily":
+        return today.isoformat()
+
+    if frequency in ("weekly", "biweekly"):
+        year, week, _ = today.isocalendar()
+        return f"{year}-W{week:02d}"
+
+    if frequency == "monthly":
+        return today.strftime("%Y-%m")
+
+    raise ValueError(f"Unsupported frequency: {frequency}")
+
+
+def get_previous_period_label(frequency: str = "weekly") -> str:
+    """Return the previous period label for a tracker frequency."""
+    frequency = frequency.lower()
+    today = datetime.date.today()
+
+    if frequency == "daily":
+        return (today - datetime.timedelta(days=1)).isoformat()
+
+    if frequency == "weekly":
+        previous = today - datetime.timedelta(weeks=1)
+        year, week, _ = previous.isocalendar()
+        return f"{year}-W{week:02d}"
+
+    if frequency == "biweekly":
+        previous = today - datetime.timedelta(weeks=2)
+        year, week, _ = previous.isocalendar()
+        return f"{year}-W{week:02d}"
+
+    if frequency == "monthly":
+        first_of_month = today.replace(day=1)
+        previous_month_end = first_of_month - datetime.timedelta(days=1)
+        return previous_month_end.strftime("%Y-%m")
+
+    raise ValueError(f"Unsupported frequency: {frequency}")
+
+
+def get_period_date_range(frequency: str = "weekly", weeks_ago: int = 0):
+    """Return the date range for the current period based on frequency."""
+    frequency = frequency.lower()
+
+    if frequency == "daily":
+        today = datetime.date.today()
+        return today, today
+
+    if frequency in ("weekly", "biweekly"):
+        return get_week_range(weeks_ago)
+
+    if frequency == "monthly":
+        today = datetime.date.today()
+        start = today.replace(day=1)
+        next_month = (start.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+        end = next_month - datetime.timedelta(days=1)
+        return start, end
+
+    raise ValueError(f"Unsupported frequency: {frequency}")
+
+
 def fetch_papers(
     topic: str,
     max_results: int = 500,
-    weeks_ago: int = 0
+    weeks_ago: int = 0,
+    frequency: str = "weekly"
 ) -> list[dict]:
     """
     Fetch papers from ArXiv for a given topic.
@@ -58,8 +124,8 @@ def fetch_papers(
             "week":        "2026-W24"
         }
     """
-    start_date, end_date = get_week_range(weeks_ago)
-    week_label = get_iso_week(weeks_ago)
+    start_date, end_date = get_period_date_range(frequency, weeks_ago)
+    week_label = get_period_label(frequency)
 
     # Build the ArXiv search
     search = arxiv.Search(
@@ -75,11 +141,8 @@ def fetch_papers(
     for result in client.results(search):
         pub_date = result.updated.date()
 
-        # If we've gone past the target week, stop — results are sorted newest first
-        if pub_date < start_date:
-            continue
-
-        if pub_date > end_date:
+        # If the paper is outside the current period, skip it.
+        if pub_date < start_date or pub_date > end_date:
             continue
 
         paper = {

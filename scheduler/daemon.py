@@ -18,7 +18,11 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ingestion.arxiv_fetcher import fetch_papers, get_iso_week
+from ingestion.arxiv_fetcher import (
+    fetch_papers,
+    get_period_label,
+    get_previous_period_label,
+)
 from processing.chunker_embedder import process_documents
 from storage.vector_store import save_chunks, query_chunks
 from rag.prompt_builder import build_messages
@@ -108,8 +112,8 @@ def run_pipeline(tracker: dict):
     try:
         # Step 1 — Fetch everything ArXiv returns, no artificial limit
         query      = _build_arxiv_query(topic)
-        week_label = get_iso_week(0)
-        papers     = fetch_papers(topic=query, weeks_ago=0)
+        week_label = get_period_label(tracker.get("frequency", "weekly"))
+        papers     = fetch_papers(topic=query, frequency=tracker.get("frequency", "weekly"))
 
         if not papers:
             log.warning(f"No papers found for '{topic}' this period.")
@@ -142,7 +146,7 @@ def run_pipeline(tracker: dict):
             delta_context = prepare_delta_context(
                 topic=topic,
                 week_current=week_label,
-                week_previous=get_iso_week(1),
+                week_previous=get_previous_period_label(tracker.get("frequency", "weekly")),
             )
             if delta_context.get("has_data"):
                 messages     = build_delta_messages(delta_context)

@@ -15,7 +15,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from ingestion.arxiv_fetcher import fetch_papers, get_iso_week
+from ingestion.arxiv_fetcher import (
+    fetch_papers,
+    get_period_label,
+    get_previous_period_label,
+)
 from processing.chunker_embedder import process_documents
 from storage.vector_store import save_chunks, query_chunks, get_stats
 from rag.prompt_builder import build_messages
@@ -144,8 +148,8 @@ def run_tracker(tracker_id: str):
     query   = tracker["query"]
     mode    = tracker["report_mode"]
 
-    week_current  = get_iso_week(0)
-    week_previous = get_iso_week(1)
+    week_current  = get_period_label(tracker["frequency"])
+    week_previous = get_previous_period_label(tracker["frequency"])
 
     results = {
         "tracker_id":    tracker_id,
@@ -163,7 +167,7 @@ def run_tracker(tracker_id: str):
 
     try:
         # Step 1 — Ingest
-        papers = fetch_papers(topic=query, weeks_ago=0)
+        papers = fetch_papers(topic=query, frequency=tracker["frequency"])
         if papers:
             chunks = process_documents(papers)
             save_chunks(chunks)
@@ -232,8 +236,8 @@ def get_latest_report(tracker_id: str):
     tracker = _load_tracker(tracker_id)
     topic   = tracker["topic"]
 
-    week_current  = get_iso_week(0)
-    week_previous = get_iso_week(1)
+    week_current  = get_period_label(tracker["frequency"])
+    week_previous = get_previous_period_label(tracker["frequency"])
 
     summary = load_summary(topic, week_current)
     delta   = load_report(topic, week_current, week_previous)
@@ -256,8 +260,8 @@ def ask_about_report(tracker_id: str, body: AskRequest):
     tracker = _load_tracker(tracker_id)
     topic   = tracker["topic"]
 
-    week_current  = get_iso_week(0)
-    week_previous = get_iso_week(1)
+    week_current  = get_period_label(tracker["frequency"])
+    week_previous = get_previous_period_label(tracker["frequency"])
 
     # Use delta report as context if available, else summary
     delta   = load_report(topic, week_current, week_previous)
