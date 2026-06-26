@@ -12,11 +12,11 @@ export async function getTrackers() {
   return data.trackers;
 }
 
-export async function createTracker({ topic, frequency, report_mode, max_results }) {
+export async function createTracker({ topic, frequency, report_mode}) {
   const res = await fetch(`${BASE}/trackers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, frequency, report_mode, max_results }),
+    body: JSON.stringify({ topic, frequency, report_mode}),
   });
   const data = await res.json();
   return data.tracker;

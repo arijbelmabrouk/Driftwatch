@@ -21,10 +21,10 @@ The real danger isn't the papers you read and disagree with. It's the ones you n
 ## How It Works
 
 1. **Register a tracker** — describe your topic in plain language. Driftwatch auto-formats it into a precise ArXiv query behind the scenes. No query syntax required.
-2. **Choose your frequency** — daily, weekly, biweekly, or monthly. The system runs on your schedule, not its own. Current implementation defaults to weekly; configurable frequency per tracker is on the roadmap.
-3. **Choose your report mode** — weekly summary (what's happening this period), delta report (what changed since last period), or both.
-4. **It runs autonomously** — every period it ingests new papers from ArXiv (and later GitHub and HackerNews), chunks and embeds them, and stores them in a local vector database stamped with that period's identifier.
-5. **You get a report** — grounded in real sources, saved to disk, never hallucinated.
+2. **Choose your frequency** — daily, weekly, biweekly, or monthly. Each tracker runs on its own schedule. The daemon checks every hour and runs any tracker that is due.
+3. **Choose your report mode** — summary (what's happening this period), delta (what changed since last period), or both.
+4. **It runs autonomously** — the background daemon ingests new papers from ArXiv, chunks and embeds them, and stores them in a local vector database stamped with that period's identifier. No manual input required after setup.
+5. **You get a report** — grounded in real sources, saved to disk, never hallucinated. Open the dashboard anytime to read reports that were already generated while you were away.
 
 ---
 
@@ -49,7 +49,7 @@ The combination is the innovation.
 
 ## Report Types
 
-### Weekly Summary
+### Summary
 Answers: *"what are papers saying about X this period?"*
 
 Four sections: MAIN THEME · NOTABLE FINDINGS · CONTESTED · OPEN GAP
@@ -76,15 +76,19 @@ RecursiveCharacterTextSplitter → chunks (~500 chars, 50 overlap)
         ↓
 sentence-transformers all-MiniLM-L6-v2 → 384-dim embeddings (local)
         ↓
-ChromaDB (persistent, cosine similarity) ← stamped with ISO period identifier
+ChromaDB (persistent, cosine similarity) ← stamped with period identifier
         ↓
-        ├── [Summary mode]  similarity search → top 10 chunks → Groq LLM → summary report
+        ├── [Summary mode]  similarity search → top chunks → Groq LLM → summary report
         └── [Delta mode]    fetch current + previous period chunks
                             → set comparison (new / continuing / dropped)
                             → Groq LLM → delta report
                             → saved to disk (JSON + .txt)
         ↓
 FastAPI backend → React dashboard
+
+Background daemon (APScheduler):
+    checks every hour → runs any tracker due based on its frequency
+    → fires pipeline automatically → report ready when you open the dashboard
 ```
 
 Everything runs locally. No cloud database. No paid APIs. No subscription.
@@ -140,7 +144,7 @@ Settings: `chunk_size=500` characters (~80-100 words), `chunk_overlap=50` charac
 **Why Groq specifically?** Free tier gives 14,400 tokens/minute. One report costs ~3,300 tokens total — more than enough for any reasonable report frequency.
 
 Token budget per report:
-- 10 retrieved chunks × ~200 tokens = ~2,000 tokens input
+- Retrieved chunks × ~200 tokens = ~2,000 tokens input
 - System prompt + instructions = ~500 tokens
 - LLM response = ~800 tokens
 - **Total: ~3,300 tokens per report**
@@ -159,9 +163,16 @@ The reasoning section is the most important — it tells the LLM to think throug
 
 ---
 
-### Report Frequency — User-Configurable
+### Report Frequency — User-Configurable Per Tracker
 
-The period identifier stamped on every chunk (`2026-W25` for weekly, `2026-06-21` for daily, `2026-06` for monthly) is the only thing that changes between frequency modes. The delta logic compares period N vs period N-1 regardless of what the period unit is. Current implementation uses weekly periods. Per-tracker configurable frequency (daily / weekly / biweekly / monthly) is a V1 feature.
+Each tracker has its own frequency setting. The period identifier stamped on every chunk adapts to that frequency:
+
+- daily → `2026-06-26`
+- weekly → `2026-W26`
+- biweekly → `2026-W26` (runs every two weeks)
+- monthly → `2026-06`
+
+The delta logic compares period N vs period N-1 regardless of the time unit. The daemon checks every hour and runs any tracker whose last run was more than `frequency_days` ago — 1 for daily, 7 for weekly, 14 for biweekly, 30 for monthly.
 
 ---
 
@@ -179,15 +190,23 @@ Reports are saved to disk as both JSON (for the dashboard) and `.txt` (for human
 
 ---
 
+### Scheduler Daemon — APScheduler
+
+`scheduler/daemon.py` runs as a background process. On start it runs an immediate check, then checks every hour. For each tracker it evaluates whether enough time has passed since the last run based on the tracker's frequency. If due, it runs the full pipeline — fetch, chunk, embed, store, generate reports, save to disk.
+
+The daemon is independent of the FastAPI server and the dashboard. It works whether or not the browser is open. When a new tracker is created from the dashboard, the API also fires the pipeline immediately in a background thread — so the first report is ready within minutes of creation.
+
+---
+
 ### Backend — FastAPI
 
-Thin API layer between the React dashboard and the Python pipeline. Five endpoints: list trackers, create tracker, run tracker, get latest report, ask a question scoped to a report. Tracker configs stored as JSON files in `data/trackers/`. No database required.
+Thin API layer between the React dashboard and the Python pipeline. Endpoints: list trackers, create tracker, run tracker manually, get latest reports (returns both summary and delta), ask a question scoped to a report. Tracker configs stored as JSON files in `data/trackers/`. No database required.
 
 ---
 
 ### Frontend — React + Vite
 
-Single-page dashboard. Tracker cards grid, delta report panel, ask bar scoped to the selected report. All API calls centralized in `api.js` — components never call `fetch()` directly. Dark theme matching the design mockup.
+Single-page dashboard. Tracker cards grid, report panel showing both summary and delta when mode is "both", ask bar scoped to the selected report. All API calls centralized in `api.js`. Dark theme.
 
 ---
 
@@ -195,11 +214,11 @@ Single-page dashboard. Tracker cards grid, delta report panel, ask bar scoped to
 
 **Why ArXiv first?** Free, no key required, structured data, well-documented Python library. Best source for validating the pipeline before adding messier sources.
 
-**Query format:** `cat:cs.LG AND abs:"topic"` — category filter (cs.LG = Machine Learning) plus abstract phrase match. Plain English input auto-converted by `build_arxiv_query()` in `main.py`.
+**Query format:** `cat:cs.LG AND abs:"topic"` — category filter (cs.LG = Machine Learning) plus abstract phrase match. Plain English input auto-converted by `build_arxiv_query()`.
 
-**Date field:** `result.updated.date()` — more reliable than `published` for weekly filtering since it reflects when the paper actually appeared on ArXiv.
+**Date field:** `result.updated.date()` — more reliable than `published` for period filtering since it reflects when the paper actually appeared on ArXiv.
 
-**Period stamp:** Every chunk carries an ISO week string (`2026-W25`). This is the metadata field ChromaDB filters on to retrieve "this period only" vs "last period only."
+**Period stamp:** Every chunk carries a period identifier matching the tracker's frequency. ChromaDB filters on this field to retrieve chunks from a specific period.
 
 ---
 
@@ -209,20 +228,22 @@ Single-page dashboard. Tracker cards grid, delta report panel, ask bar scoped to
 Driftwatch/
 ├── main.py                        ← interactive entry point, mode selection
 ├── ingestion/
-│   └── arxiv_fetcher.py           ← fetches papers, stamps with period identifier
+│   └── arxiv_fetcher.py           ← fetches papers, frequency-aware period stamping
 ├── processing/
 │   └── chunker_embedder.py        ← recursive chunking + local embeddings
 ├── storage/
-│   └── vector_store.py            ← ChromaDB save + query by topic/period
+│   └── vector_store.py            ← ChromaDB save + smart retrieval
 ├── rag/
 │   ├── prompt_builder.py          ← assembles summary prompt (6-component structure)
 │   └── llm_caller.py              ← sends to Groq, returns report string
 ├── delta/
 │   ├── comparator.py              ← fetches two periods, set comparison logic
 │   ├── delta_prompt.py            ← assembles delta prompt (6-component structure)
-│   └── report.py                  ← saves reports to disk as JSON + .txt
+│   └── report.py                  ← saves summary + delta reports to disk as JSON
 ├── api/
 │   └── main.py                    ← FastAPI backend, all endpoints
+├── scheduler/
+│   └── daemon.py                  ← background daemon, hourly check, APScheduler
 ├── dashboard/                     ← React + Vite frontend
 │   └── src/
 │       ├── App.jsx                ← main app, state management
@@ -248,10 +269,10 @@ Driftwatch/
 | LLM | Groq API — llama-3.1-8b-instant | Free, fast, 131k context |
 | Delta logic | Set comparison + structured prompting | Period N vs N-1, any frequency |
 | Report storage | JSON + .txt on disk | Persistent, dashboard-ready |
+| Scheduler | APScheduler | Hourly check, frequency-aware, zero manual input |
 | Backend | FastAPI + uvicorn | Lightweight, async, auto-docs |
 | Frontend | React + Vite | Fast dev server, component-based |
 | Orchestration | LangGraph (upcoming) | Stateful multi-step agentic pipeline |
-| Scheduler | APScheduler (upcoming) | Runs at user-chosen frequency |
 | Data sources (upcoming) | GitHub API · HackerNews Firebase | All free |
 
 100% free and open source. No paid APIs required.
@@ -261,7 +282,7 @@ Driftwatch/
 ## Project Status
 
 **Phase 1 complete** — Ingestion pipeline
-- ArXiv fetcher with ISO period stamping
+- ArXiv fetcher with frequency-aware period stamping (daily / weekly / biweekly / monthly)
 - RecursiveCharacterTextSplitter + sentence-transformers embeddings
 - ChromaDB persistent storage with cosine similarity
 - Interactive `main.py` connecting all three
@@ -269,7 +290,7 @@ Driftwatch/
 **Phase 2 complete** — RAG layer
 - Groq LLM integration (llama-3.1-8b-instant)
 - Six-component prompt design
-- Weekly summary report generation
+- Summary report generation
 
 **Phase 3 complete** — Delta logic
 - Period comparator (set comparison: new / continuing / dropped)
@@ -278,10 +299,17 @@ Driftwatch/
 - Two report modes: summary and delta
 
 **Phase 4 complete** — FastAPI backend + React dashboard
-- FastAPI backend with five endpoints
+- FastAPI backend with full endpoint set
 - React dashboard with tracker cards, report panel, ask bar
-- Full pipeline triggerable from the browser
+- Both summary and delta rendered when mode is "both"
 - Scoped Q&A on any report via Groq
+
+**Phase 5 complete** — Scheduler daemon + frequency-aware periods
+- APScheduler daemon running hourly checks
+- Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
+- Period labels adapt to frequency — daily shows dates, weekly shows ISO weeks, monthly shows months
+- Immediate pipeline run on tracker creation via background thread
+- Summary reports saved as JSON and loadable from disk
 
 ---
 
@@ -297,16 +325,17 @@ Driftwatch/
 - [x] FastAPI backend
 - [x] React dashboard with tracker cards, report viewer, ask bar
 
-### V1 (Phases 5–10) — Multi-Source + Automation
-- [ ] Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
+### V1 (Phases 5–8) — Automation + Multi-Source
+- [x] Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
+- [x] APScheduler daemon (runs at user-chosen frequency, zero manual input)
+- [x] Immediate pipeline run on tracker creation
 - [ ] GitHub trending repos ingestion (READMEs, changelogs, star velocity)
 - [ ] HackerNews discussions ingestion (Firebase API)
 - [ ] Contradiction detection between papers
 - [ ] Instant alerts for CVEs and retractions
 - [ ] Email delivery of reports
-- [ ] APScheduler daemon (runs at user-chosen frequency, zero manual input)
 
-### V1.5 (Phases 11–14) — Project-Aware Mode
+### V1.5 (Phases 9–12) — Project-Aware Mode
 - [ ] VS Code extension — detects open project folder
 - [ ] Auto-extract stack from requirements.txt / package.json / README
 - [ ] Confirmation prompt before auto-creating tracker
@@ -348,6 +377,11 @@ Start the dashboard (separate terminal):
 cd dashboard
 npm install
 npm run dev
+```
+
+Start the daemon (separate terminal, optional — runs pipelines automatically):
+```bash
+python scheduler/daemon.py
 ```
 
 Open `http://localhost:5173` in your browser.
