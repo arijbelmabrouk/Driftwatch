@@ -151,7 +151,7 @@ def run_pipeline(tracker: dict):
                 messages = build_messages(topic, week_label, retrieved)
                 summary  = generate_report(messages)
 
-                save_summary(topic=topic, week_current=week_label, report_text=summary)
+                save_summary(topic=topic, week_current=week_label, report_text=summary, chunks=retrieved)
                 log.info("Summary report saved.")
                 time.sleep(3)  # avoid Groq 429 when both summary and delta run back to back
 

@@ -130,6 +130,21 @@ export default function ReportPanel({ tracker, onTrackerUpdated }) {
         </div>
       )}
 
+      {/* Sources */}
+      {(summaryReport?.sources?.length > 0 || deltaReport?.sources?.length > 0) && (
+        <div style={styles.section}>
+          <div style={styles.sectionLabel}>Sources</div>
+          <div style={styles.sourcesList}>
+            {(deltaReport?.sources || summaryReport?.sources || []).map((s, i) => (
+              <div key={`${s.source}-${i}`} style={styles.sourceItem}>
+                <div style={styles.sourceTag(s.source)}>{s.source}</div>
+                <div style={styles.sourceTitle}>{s.title || s.url}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Answer */}
       {answer && (
         <div style={styles.section}>
@@ -227,4 +242,8 @@ const styles = {
   askBar: { position: "sticky", bottom: 0, display: "flex", gap: 8, padding: "12px 28px", background: "#13131a", borderTop: "1px solid #1e1e26" },
   askInput: { flex: 1, background: "#161619", border: "1px solid #262630", borderRadius: 6, padding: "9px 14px", color: "#c0c0d0", fontSize: 13, outline: "none" },
   askBtn: (disabled) => ({ padding: "9px 18px", background: disabled ? "#1a1a22" : "#2a2a6a", border: "1px solid " + (disabled ? "#242430" : "#3636a0"), borderRadius: 6, color: disabled ? "#3a3a4a" : "#8080d0", fontSize: 13, cursor: disabled ? "not-allowed" : "pointer" }),
+  sourcesList: { display: "flex", flexDirection: "column", gap: 6 },
+  sourceItem: { display: "flex", alignItems: "flex-start", gap: 8, textDecoration: "none", padding: "6px 0", borderBottom: "1px solid #1a1a22" },
+  sourceTag: (source) => ({ fontSize: 9, fontWeight: 700, color: source === "github" ? "#4a9a6a" : "#6060b0", background: source === "github" ? "#152018" : "#161628", border: "1px solid " + (source === "github" ? "#1e3024" : "#2a2a44"), borderRadius: 3, padding: "2px 6px", textTransform: "uppercase", flexShrink: 0, marginTop: 2 }),
+  sourceTitle: { fontSize: 12, color: "#8080a0", lineHeight: 1.5 },
 };

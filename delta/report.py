@@ -54,6 +54,10 @@ def save_report(
         "week_previous": week_previous,
         "generated_at":  datetime.datetime.now().isoformat(),
         "report":        report_text,
+        "sources": [
+            {"title": c.get("title", ""), "url": c.get("url", ""), "source": c.get("source", "arxiv")}
+            for c in {c["title"]: c for c in (context.get("all_current", []) if context else [])}.values()
+        ],
         "metadata": {
             "new_papers":        len(set(c["title"] for c in context["new"]))        if context and "new" in context else 0,
             "continuing_papers": len(set(c["title"] for c in context["continuing"])) if context and "continuing" in context else 0,
@@ -80,7 +84,7 @@ def load_report(topic: str, week_current: str, week_previous: str) -> dict | Non
 
 # ── Summary report ────────────────────────────────────────────────────────────
 
-def save_summary(topic: str, week_current: str, report_text: str) -> str:
+def save_summary(topic: str, week_current: str, report_text: str, chunks: list = None) -> str:
     """Saves a summary report as JSON so it can be loaded back by the API."""
     topic_slug = _slugify(topic)
     report_dir = os.path.join(REPORTS_DIR, topic_slug, f"{week_current}_summary")
@@ -92,6 +96,10 @@ def save_summary(topic: str, week_current: str, report_text: str) -> str:
         "week_current": week_current,
         "generated_at": datetime.datetime.now().isoformat(),
         "report":       report_text,
+        "sources": [
+            {"title": c.get("title", ""), "url": c.get("url", ""), "source": c.get("source", "arxiv")}
+            for c in {c["title"]: c for c in (chunks or [])}.values()
+        ],
     }
 
     with open(os.path.join(report_dir, "report.json"), "w", encoding="utf-8") as f:

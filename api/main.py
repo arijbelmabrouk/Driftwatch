@@ -190,7 +190,7 @@ def run_tracker(tracker_id: str):
                 messages     = build_messages(topic=topic, week=week_current, chunks=retrieved)
                 summary_text = generate_report(messages)
                 # Save to disk so it can be loaded back on next mount
-                save_summary(topic=topic, week_current=week_current, report_text=summary_text)
+                save_summary(topic=topic, week_current=week_current, report_text=summary_text, chunks=retrieved)
                 # Return the same structure as load_summary so frontend can consume it
                 results["summary"] = load_summary(topic, week_current)
 
