@@ -136,10 +136,16 @@ export default function ReportPanel({ tracker, onTrackerUpdated }) {
           <div style={styles.sectionLabel}>Sources</div>
           <div style={styles.sourcesList}>
             {(deltaReport?.sources || summaryReport?.sources || []).map((s, i) => (
-              <div key={`${s.source}-${i}`} style={styles.sourceItem}>
+              <a
+                key={`${s.source}-${i}`}
+                href={s.url}
+                target="_blank"
+                rel="noreferrer"
+                style={styles.sourceItem}
+              >
                 <div style={styles.sourceTag(s.source)}>{s.source}</div>
                 <div style={styles.sourceTitle}>{s.title || s.url}</div>
-              </div>
+              </a>
             ))}
           </div>
         </div>
