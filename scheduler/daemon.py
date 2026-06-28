@@ -17,6 +17,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from ingestion.github_fetcher import fetch_github_repos
+
 
 from ingestion.arxiv_fetcher import (
     fetch_papers,
@@ -122,8 +124,20 @@ def run_pipeline(tracker: dict):
 
         log.info(f"Fetched {len(papers)} papers.")
 
+        
+        # Step 1b — Fetch GitHub repos for same topic
+        github_docs = fetch_github_repos(
+            topic=topic,
+            frequency=tracker.get("frequency", "weekly"),
+        )
+        log.info(f"Fetched {len(github_docs)} GitHub repos.")
+
+        # Merge both sources
+        all_documents = papers + github_docs
+
+
         # Step 2 — Chunk + embed
-        chunks = process_documents(papers)
+        chunks = process_documents(all_documents)
         log.info(f"Created {len(chunks)} chunks.")
 
         # Step 3 — Save to ChromaDB

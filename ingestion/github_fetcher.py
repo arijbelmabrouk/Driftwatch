@@ -5,15 +5,26 @@ Job: fetch relevant GitHub repos for a given topic and period.
 Returns document dicts in the same format as arxiv_fetcher.py
 so they flow into chunker_embedder.py and ChromaDB unchanged.
 
+Period labels are imported from arxiv_fetcher.py — single source of truth
+for all period calculations across all fetchers.
+
 API used: GitHub Search API (free, 5000 req/hour with token)
+Requires GITHUB_TOKEN in .env — get one free at github.com/settings/tokens
+No scopes needed.
 """
 
 import os
 import base64
-import datetime
 import requests
 from dotenv import load_dotenv
 from pathlib import Path
+
+# Period helpers — imported from arxiv_fetcher to guarantee consistent
+# week/day/month stamps across all sources in ChromaDB
+from ingestion.arxiv_fetcher import (
+    get_period_label,
+    get_period_date_range,
+)
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env", override=True)
 
@@ -37,52 +48,11 @@ README_MAX_CHARS = 1500
 def _build_github_query(topic: str, since_date: str) -> str:
     """
     Builds a GitHub search query from a plain topic and a since-date.
-    Searches repo name, description, and README content.
+    Searches repo name and description only — not README — to avoid
+    returning unrelated repos that merely mention the topic in passing.
+    stars:>100 filters out hobby/test repos that aren't real signal.
     """
     return f"{topic} in:name,description stars:>100 pushed:>{since_date}"
-
-
-# ── Period helpers ─────────────────────────────────────────────────────────────
-# These mirror the logic in arxiv_fetcher.py so period labels are consistent
-# across both sources and filter correctly in ChromaDB.
-
-def _get_period_start(frequency: str) -> str:
-    """Returns the start date of the current period as an ISO date string."""
-    today = datetime.date.today()
-
-    if frequency == "daily":
-        return today.isoformat()
-
-    if frequency in ("weekly", "biweekly"):
-        # Monday of this week
-        start = today - datetime.timedelta(days=today.weekday())
-        return start.isoformat()
-
-    if frequency == "monthly":
-        return today.replace(day=1).isoformat()
-
-    raise ValueError(f"Unsupported frequency: {frequency}")
-
-
-def _get_period_label(frequency: str) -> str:
-    """
-    Returns the period label for the current period.
-    Mirrors arxiv_fetcher.get_period_label exactly so both sources
-    stamp chunks with the same week identifier in ChromaDB.
-    """
-    today = datetime.date.today()
-
-    if frequency == "daily":
-        return today.isoformat()
-
-    if frequency in ("weekly", "biweekly"):
-        year, week, _ = today.isocalendar()
-        return f"{year}-W{week:02d}"
-
-    if frequency == "monthly":
-        return today.strftime("%Y-%m")
-
-    raise ValueError(f"Unsupported frequency: {frequency}")
 
 
 # ── README fetcher ────────────────────────────────────────────────────────────
@@ -115,8 +85,8 @@ def fetch_github_repos(
 
     Args:
         topic:     plain English topic e.g. "large language models"
-        frequency: daily / weekly / biweekly / monthly — no default,
-                   always passed explicitly from the tracker config
+        frequency: daily / weekly / biweekly / monthly — passed from tracker config.
+                   Controls the date window and the period label stamped on chunks.
 
     Returns:
         List of document dicts ready for chunker_embedder.process_documents().
@@ -126,9 +96,13 @@ def fetch_github_repos(
     if not GITHUB_TOKEN:
         print("[github_fetcher] Warning: no GITHUB_TOKEN found. Rate limited to 60 req/hour.")
 
-    since_date   = _get_period_start(frequency)
-    period_label = _get_period_label(frequency)
-    query        = _build_github_query(topic, since_date)
+    # Use arxiv_fetcher's period helpers — single source of truth
+    # get_period_date_range returns (start_date, end_date) as datetime.date objects
+    start_date, _  = get_period_date_range(frequency)
+    since_date     = str(start_date)          # "2026-06-23" for weekly, "2026-06-28" for daily
+    period_label   = get_period_label(frequency)  # "2026-W26", "2026-06-28", "2026-06"
+
+    query = _build_github_query(topic, since_date)
 
     url = f"{BASE_URL}/search/repositories"
     params = {
@@ -151,20 +125,18 @@ def fetch_github_repos(
     for item in items:
         owner     = item["owner"]["login"]
         repo_name = item["name"]
-        full_name = item["full_name"]          # "owner/repo"
+        full_name = item["full_name"]
         desc      = item.get("description") or ""
         stars     = item.get("stargazers_count", 0)
         language  = item.get("language") or "unknown"
-        pushed_at = item.get("pushed_at", "")[:10]  # "2026-06-26"
+        pushed_at = item.get("pushed_at", "")[:10]
         html_url  = item["html_url"]
 
-        # Fetch README for richer content — description alone is too short
         readme = _fetch_readme(owner, repo_name)
 
-        # Combine description + README as the document text
         text = f"{desc}\n\n{readme}".strip()
         if not text:
-            continue  # skip repos with no content at all
+            continue
 
         doc = {
             "source":    "github",
@@ -175,7 +147,7 @@ def fetch_github_repos(
             "published": pushed_at,
             "authors":   [owner],
             "topic":     topic,
-            "week":      period_label,   # ← same field name as arxiv_fetcher
+            "week":      period_label,   # same field, same value as arxiv_fetcher chunks
             "stars":     stars,
             "language":  language,
         }
@@ -186,11 +158,15 @@ def fetch_github_repos(
 
 # ── Quick test ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
     topic     = input("Topic: ").strip() or "large language models"
     frequency = input("Frequency (daily/weekly/biweekly/monthly) [default: weekly]: ").strip() or "weekly"
 
     print(f"\nFetching GitHub repos for: '{topic}' ({frequency})")
-    print(f"Period: {_get_period_label(frequency)}\n")
+    print(f"Period : {get_period_label(frequency)}")
+    print(f"Since  : {get_period_date_range(frequency)[0]}\n")
 
     repos = fetch_github_repos(topic=topic, frequency=frequency)
 

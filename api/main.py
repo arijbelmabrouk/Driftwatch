@@ -27,7 +27,7 @@ from rag.llm_caller import generate_report
 from delta.comparator import prepare_delta_context
 from delta.delta_prompt import build_delta_messages
 from delta.report import save_report, load_report, save_summary, load_summary, list_reports
-
+from ingestion.github_fetcher import fetch_github_repos
 
 def _run_pipeline_background(tracker: dict):
     from scheduler.daemon import run_pipeline
@@ -166,12 +166,22 @@ def run_tracker(tracker_id: str):
     _save_tracker(tracker)
 
     try:
-        # Step 1 — Ingest
+        # Step 1 — Ingest from ArXiv
         papers = fetch_papers(topic=query, frequency=tracker["frequency"])
-        if papers:
-            chunks = process_documents(papers)
+
+        # Step 1b — Ingest from GitHub
+        github_docs = fetch_github_repos(
+            topic=topic,
+            frequency=tracker["frequency"],
+        )
+
+        # Merge both sources
+        all_documents = papers + github_docs
+
+        if all_documents:
+            chunks = process_documents(all_documents)
             save_chunks(chunks)
-            tracker["signal_count"] = len(papers)
+            tracker["signal_count"] = len(all_documents)
 
         # Step 2 — Summary
         if mode in ("summary", "both"):
