@@ -20,11 +20,11 @@ The real danger isn't the papers you read and disagree with. It's the ones you n
 
 ## How It Works
 
-1. **Register a tracker** — describe your topic in plain language. Driftwatch auto-formats it into a precise ArXiv query behind the scenes. No query syntax required.
+1. **Register a tracker** — describe your topic in plain language. Driftwatch auto-formats it into precise queries for each source behind the scenes. No query syntax required.
 2. **Choose your frequency** — daily, weekly, biweekly, or monthly. Each tracker runs on its own schedule. The daemon checks every hour and runs any tracker that is due.
 3. **Choose your report mode** — summary (what's happening this period), delta (what changed since last period), or both.
-4. **It runs autonomously** — the background daemon ingests new papers from ArXiv, chunks and embeds them, and stores them in a local vector database stamped with that period's identifier. No manual input required after setup.
-5. **You get a report** — grounded in real sources, saved to disk, never hallucinated. Open the dashboard anytime to read reports that were already generated while you were away.
+4. **It runs autonomously** — the background daemon ingests new papers from ArXiv and repos from GitHub, chunks and embeds them, and stores them in a local vector database stamped with that period's identifier. No manual input required after setup.
+5. **You get a report** — grounded in real sources from multiple platforms, saved to disk, never hallucinated. Every source is listed as a clickable bibliography at the bottom of the report.
 
 ---
 
@@ -42,6 +42,7 @@ Every individual piece of this system exists somewhere. The combination doesn't.
 | Delta report — what changed vs last period | no |
 | Push-based, zero user input after setup | no |
 | Cross-disciplinary collision detection | no |
+| Clickable bibliography per report | no |
 
 The combination is the innovation.
 
@@ -50,7 +51,7 @@ The combination is the innovation.
 ## Report Types
 
 ### Summary
-Answers: *"what are papers saying about X this period?"*
+Answers: *"what are papers and repos saying about X this period?"*
 
 Four sections: MAIN THEME · NOTABLE FINDINGS · CONTESTED · OPEN GAP
 
@@ -59,7 +60,9 @@ Answers: *"what changed about X compared to last period?"*
 
 Four sections: NEW THIS WEEK · STILL ACTIVE · FADING OUT · EMERGING DISPUTE
 
-The delta report is what makes Driftwatch unique. It requires at least two periods of stored data and uses set comparison across ChromaDB to categorize every paper as new, continuing, or dropped — before passing that structured context to the LLM.
+The delta report is what makes Driftwatch unique. It requires at least two periods of stored data and uses set comparison across ChromaDB to categorize every source as new, continuing, or dropped — before passing that structured context to the LLM.
+
+Each report ends with a **Sources** section — every ArXiv paper and GitHub repo that informed the report, tagged by source type and linking directly to the original.
 
 ---
 
@@ -68,23 +71,24 @@ The delta report is what makes Driftwatch unique. It requires at least two perio
 ```
 User types plain topic + chooses frequency + chooses report mode
         ↓
-auto-format → ArXiv query (cat:cs.LG AND abs:"topic")
+        ├── ArXiv API → papers (title, abstract, url, authors)
+        └── GitHub API → repos (name, description, README, stars)
         ↓
-ArXiv API → raw papers (title, abstract, url, authors)
+Merge all documents from both sources
         ↓
 RecursiveCharacterTextSplitter → chunks (~500 chars, 50 overlap)
         ↓
 sentence-transformers all-MiniLM-L6-v2 → 384-dim embeddings (local)
         ↓
-ChromaDB (persistent, cosine similarity) ← stamped with period identifier
+ChromaDB (persistent, cosine similarity) ← stamped with period identifier + source tag
         ↓
         ├── [Summary mode]  similarity search → top chunks → Groq LLM → summary report
         └── [Delta mode]    fetch current + previous period chunks
                             → set comparison (new / continuing / dropped)
                             → Groq LLM → delta report
-                            → saved to disk (JSON + .txt)
+                            → saved to disk (JSON + .txt) with sources list
         ↓
-FastAPI backend → React dashboard
+FastAPI backend → React dashboard (summary + delta + clickable bibliography)
 
 Background daemon (APScheduler):
     checks every hour → runs any tracker due based on its frequency
@@ -103,7 +107,7 @@ Everything runs locally. No cloud database. No paid APIs. No subscription.
 
 **Why not semantic chunker?** Semantic chunking uses embeddings to find meaning boundaries — more intelligent, but 3-4x slower. Unnecessary for batch processing.
 
-**Why Recursive?** It tries to split in priority order: paragraphs → sentences → words → characters. For clean ArXiv abstracts it splits on sentences. For messy GitHub READMEs or HackerNews threads it falls back gracefully. Same chunker handles all future sources without modification.
+**Why Recursive?** It tries to split in priority order: paragraphs → sentences → words → characters. For clean ArXiv abstracts it splits on sentences. For messy GitHub READMEs or HackerNews threads it falls back gracefully. Same chunker handles all sources without modification.
 
 Settings: `chunk_size=500` characters (~80-100 words), `chunk_overlap=50` characters. Overlap prevents context loss at chunk boundaries.
 
@@ -163,6 +167,16 @@ The reasoning section is the most important — it tells the LLM to think throug
 
 ---
 
+### Data Sources
+
+**ArXiv API** — academic papers. Free, no key required, structured data. Query format: `cat:cs.LG AND abs:"topic"`. Every paper is stamped with the tracker's period identifier and `source: arxiv`.
+
+**GitHub API** — trending repos. Requires a free token (no scopes needed). Searches repo name and description with `stars:>100` quality filter. Fetches README content truncated to 1,500 characters. Every repo is stamped with the same period identifier and `source: github`. Single source of truth for period labels — both fetchers import period helpers from `arxiv_fetcher.py` to guarantee identical stamps in ChromaDB.
+
+Query design is kept separate per fetcher (Option A) — ArXiv and GitHub have different query syntaxes and different search semantics. Each fetcher owns its own query logic internally.
+
+---
+
 ### Report Frequency — User-Configurable Per Tracker
 
 Each tracker has its own frequency setting. The period identifier stamped on every chunk adapts to that frequency:
@@ -178,21 +192,21 @@ The delta logic compares period N vs period N-1 regardless of the time unit. The
 
 ### Delta Logic — Set Comparison
 
-The delta pipeline fetches chunks from two periods out of ChromaDB and runs set operations on paper titles:
+The delta pipeline fetches chunks from two periods out of ChromaDB and runs set operations on source titles:
 
 - **New** = titles in current period − titles in previous period
 - **Continuing** = titles in current period ∩ titles in previous period
 - **Dropped** = titles in previous period − titles in current period
 
-This structured categorization is passed to the LLM as context, along with both periods' full chunk text. The LLM never has to figure out what's new — the comparator already did that. The LLM only has to describe what it means.
+This structured categorization is passed to the LLM as context. The LLM never has to figure out what's new — the comparator already did that. The LLM only has to describe what it means.
 
-Reports are saved to disk as both JSON (for the dashboard) and `.txt` (for human reading) under `data/reports/{topic}/{period_current}_vs_{period_previous}/`.
+Reports are saved to disk as both JSON (for the dashboard) and `.txt` (for human reading) under `data/reports/{topic}/{period_current}_vs_{period_previous}/`. The JSON includes a `sources` array with title, url, and source type for every document that informed the report.
 
 ---
 
 ### Scheduler Daemon — APScheduler
 
-`scheduler/daemon.py` runs as a background process. On start it runs an immediate check, then checks every hour. For each tracker it evaluates whether enough time has passed since the last run based on the tracker's frequency. If due, it runs the full pipeline — fetch, chunk, embed, store, generate reports, save to disk.
+`scheduler/daemon.py` runs as a background process. On start it runs an immediate check, then checks every hour. For each tracker it evaluates whether enough time has passed since the last run based on the tracker's frequency. If due, it runs the full pipeline — fetch from all sources, chunk, embed, store, generate reports, save to disk.
 
 The daemon is independent of the FastAPI server and the dashboard. It works whether or not the browser is open. When a new tracker is created from the dashboard, the API also fires the pipeline immediately in a background thread — so the first report is ready within minutes of creation.
 
@@ -200,25 +214,13 @@ The daemon is independent of the FastAPI server and the dashboard. It works whet
 
 ### Backend — FastAPI
 
-Thin API layer between the React dashboard and the Python pipeline. Endpoints: list trackers, create tracker, run tracker manually, get latest reports (returns both summary and delta), ask a question scoped to a report. Tracker configs stored as JSON files in `data/trackers/`. No database required.
+Thin API layer between the React dashboard and the Python pipeline. Endpoints: list trackers, create tracker, run tracker manually, get latest reports (returns both summary and delta with sources), ask a question scoped to a report. Tracker configs stored as JSON files in `data/trackers/`. No database required.
 
 ---
 
 ### Frontend — React + Vite
 
-Single-page dashboard. Tracker cards grid, report panel showing both summary and delta when mode is "both", ask bar scoped to the selected report. All API calls centralized in `api.js`. Dark theme.
-
----
-
-### Data Source — ArXiv API
-
-**Why ArXiv first?** Free, no key required, structured data, well-documented Python library. Best source for validating the pipeline before adding messier sources.
-
-**Query format:** `cat:cs.LG AND abs:"topic"` — category filter (cs.LG = Machine Learning) plus abstract phrase match. Plain English input auto-converted by `build_arxiv_query()`.
-
-**Date field:** `result.updated.date()` — more reliable than `published` for period filtering since it reflects when the paper actually appeared on ArXiv.
-
-**Period stamp:** Every chunk carries a period identifier matching the tracker's frequency. ChromaDB filters on this field to retrieve chunks from a specific period.
+Single-page dashboard. Tracker cards grid, report panel showing both summary and delta when mode is "both", clickable sources bibliography per report with arxiv/github tags, ask bar scoped to the selected report. All API calls centralized in `api.js`. Dark theme.
 
 ---
 
@@ -228,7 +230,8 @@ Single-page dashboard. Tracker cards grid, report panel showing both summary and
 Driftwatch/
 ├── main.py                        ← interactive entry point, mode selection
 ├── ingestion/
-│   └── arxiv_fetcher.py           ← fetches papers, frequency-aware period stamping
+│   ├── arxiv_fetcher.py           ← fetches papers, frequency-aware period stamping
+│   └── github_fetcher.py          ← fetches repos, imports period helpers from arxiv_fetcher
 ├── processing/
 │   └── chunker_embedder.py        ← recursive chunking + local embeddings
 ├── storage/
@@ -239,7 +242,7 @@ Driftwatch/
 ├── delta/
 │   ├── comparator.py              ← fetches two periods, set comparison logic
 │   ├── delta_prompt.py            ← assembles delta prompt (6-component structure)
-│   └── report.py                  ← saves summary + delta reports to disk as JSON
+│   └── report.py                  ← saves summary + delta reports to disk as JSON with sources
 ├── api/
 │   └── main.py                    ← FastAPI backend, all endpoints
 ├── scheduler/
@@ -262,18 +265,19 @@ Driftwatch/
 
 | Layer | Technology | Why |
 |---|---|---|
-| Ingestion | ArXiv API | Free, no key, structured data |
-| Chunking | LangChain RecursiveCharacterTextSplitter | Handles all source types |
+| Ingestion — papers | ArXiv API | Free, no key, structured data |
+| Ingestion — repos | GitHub Search API | Free token, real adoption signal |
+| Chunking | LangChain RecursiveCharacterTextSplitter | Handles all source types — clean abstracts and messy READMEs |
 | Embeddings | sentence-transformers all-MiniLM-L6-v2 | Local, free, fast on CPU |
 | Vector store | ChromaDB (persistent, cosine) | Local, no server, Python-native |
 | LLM | Groq API — llama-3.1-8b-instant | Free, fast, 131k context |
 | Delta logic | Set comparison + structured prompting | Period N vs N-1, any frequency |
-| Report storage | JSON + .txt on disk | Persistent, dashboard-ready |
+| Report storage | JSON + .txt on disk | Persistent, dashboard-ready, includes sources list |
 | Scheduler | APScheduler | Hourly check, frequency-aware, zero manual input |
 | Backend | FastAPI + uvicorn | Lightweight, async, auto-docs |
 | Frontend | React + Vite | Fast dev server, component-based |
 | Orchestration | LangGraph (upcoming) | Stateful multi-step agentic pipeline |
-| Data sources (upcoming) | GitHub API · HackerNews Firebase | All free |
+| Data sources (upcoming) | HackerNews Firebase API | Free, practitioner signal |
 
 100% free and open source. No paid APIs required.
 
@@ -307,9 +311,16 @@ Driftwatch/
 **Phase 5 complete** — Scheduler daemon + frequency-aware periods
 - APScheduler daemon running hourly checks
 - Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
-- Period labels adapt to frequency — daily shows dates, weekly shows ISO weeks, monthly shows months
+- Period labels adapt to frequency
 - Immediate pipeline run on tracker creation via background thread
-- Summary reports saved as JSON and loadable from disk
+
+**Phase 6 complete** — GitHub ingestion + sources bibliography
+- GitHub Search API fetcher — repos matching topic by name/description, filtered by stars
+- README content fetched and truncated to meaningful signal
+- Single source of truth for period labels — github_fetcher imports from arxiv_fetcher
+- Both sources merged before chunking — same pipeline, same ChromaDB, same reports
+- Sources bibliography saved with every report — title, url, source type (arxiv/github)
+- Clickable bibliography rendered in dashboard with color-coded source tags
 
 ---
 
@@ -329,7 +340,8 @@ Driftwatch/
 - [x] Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
 - [x] APScheduler daemon (runs at user-chosen frequency, zero manual input)
 - [x] Immediate pipeline run on tracker creation
-- [ ] GitHub trending repos ingestion (READMEs, changelogs, star velocity)
+- [x] GitHub trending repos ingestion (name/description search, README, star filter)
+- [x] Clickable sources bibliography per report (arxiv + github, color-coded)
 - [ ] HackerNews discussions ingestion (Firebase API)
 - [ ] Contradiction detection between papers
 - [ ] Instant alerts for CVEs and retractions
@@ -364,8 +376,13 @@ pip install -r requirements.txt
 
 Create a `.env` file at the project root:
 ```
-GROQ_API_KEY=your_key_here
+GROQ_API_KEY=your_groq_key_here
+GITHUB_TOKEN=your_github_token_here
 ```
+
+Get a free Groq API key at [console.groq.com](https://console.groq.com) — no credit card required.
+
+Get a free GitHub token at [github.com/settings/tokens](https://github.com/settings/tokens) — no scopes needed, just generate and copy.
 
 Start the backend:
 ```bash
@@ -379,14 +396,12 @@ npm install
 npm run dev
 ```
 
-Start the daemon (separate terminal, optional — runs pipelines automatically):
+Start the daemon (separate terminal — runs pipelines automatically):
 ```bash
 python scheduler/daemon.py
 ```
 
-Open `http://localhost:5173` in your browser
-
-Get a free Groq API key at [console.groq.com](https://console.groq.com) — no credit card required.
+Open `http://localhost:5173` in your browser.
 
 ---
 
