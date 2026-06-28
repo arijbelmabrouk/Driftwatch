@@ -322,6 +322,13 @@ Driftwatch/
 - Sources bibliography saved with every report — title, url, source type (arxiv/github)
 - Clickable bibliography rendered in dashboard with color-coded source tags
 
+**Phase 7 complete** — HackerNews ingestion + multi-source bibliography
+- HackerNews stories fetched through the Algolia Search API for the active topic and period
+- Story title, story text, and top comments are combined into rich document content
+- HackerNews items are merged into the same ingestion pipeline alongside ArXiv and GitHub
+- Period labels remain consistent by reusing the ArXiv period helpers
+- Sources bibliography now includes HackerNews entries with title, url, and source type
+
 ---
 
 ## Roadmap
@@ -342,7 +349,7 @@ Driftwatch/
 - [x] Immediate pipeline run on tracker creation
 - [x] GitHub trending repos ingestion (name/description search, README, star filter)
 - [x] Clickable sources bibliography per report (arxiv + github, color-coded)
-- [ ] HackerNews discussions ingestion (Firebase API)
+- [x] HackerNews discussions ingestion (Algolia API)
 - [ ] Contradiction detection between papers
 - [ ] Instant alerts for CVEs and retractions
 - [ ] Email delivery of reports

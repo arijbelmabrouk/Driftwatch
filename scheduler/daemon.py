@@ -18,7 +18,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from ingestion.github_fetcher import fetch_github_repos
-
+from ingestion.hn_fetcher import fetch_hn_stories
 
 from ingestion.arxiv_fetcher import (
     fetch_papers,
@@ -115,16 +115,9 @@ def run_pipeline(tracker: dict):
         # Step 1 — Fetch everything ArXiv returns, no artificial limit
         query      = _build_arxiv_query(topic)
         week_label = get_period_label(tracker.get("frequency", "weekly"))
-        papers     = fetch_papers(topic=query, frequency=tracker.get("frequency", "weekly"))
+        papers = fetch_papers(topic=query, frequency=tracker.get("frequency", "weekly"))
+        log.info(f"Fetched {len(papers)} ArXiv papers.")
 
-        if not papers:
-            log.warning(f"No papers found for '{topic}' this period.")
-            update_tracker(tracker_id, "idle", datetime.datetime.now().isoformat())
-            return
-
-        log.info(f"Fetched {len(papers)} papers.")
-
-        
         # Step 1b — Fetch GitHub repos for same topic
         github_docs = fetch_github_repos(
             topic=topic,
@@ -132,9 +125,20 @@ def run_pipeline(tracker: dict):
         )
         log.info(f"Fetched {len(github_docs)} GitHub repos.")
 
-        # Merge both sources
-        all_documents = papers + github_docs
+        # Step 1c — Fetch Hacker News stories for same topic
+        hn_docs = fetch_hn_stories(
+            topic=topic,
+            frequency=tracker.get("frequency", "weekly"),
+        )
+        log.info(f"Fetched {len(hn_docs)} Hacker News stories.")
 
+        # Merge all sources
+        all_documents = papers + github_docs + hn_docs
+
+        if not all_documents:
+            log.warning(f"No data found for '{topic}' this period.")
+            update_tracker(tracker_id, "idle", datetime.datetime.now().isoformat())
+            return
 
         # Step 2 — Chunk + embed
         chunks = process_documents(all_documents)

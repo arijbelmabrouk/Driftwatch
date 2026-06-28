@@ -28,6 +28,7 @@ from delta.comparator import prepare_delta_context
 from delta.delta_prompt import build_delta_messages
 from delta.report import save_report, load_report, save_summary, load_summary, list_reports
 from ingestion.github_fetcher import fetch_github_repos
+from ingestion.hn_fetcher import fetch_hn_stories
 
 def _run_pipeline_background(tracker: dict):
     from scheduler.daemon import run_pipeline
@@ -175,8 +176,14 @@ def run_tracker(tracker_id: str):
             frequency=tracker["frequency"],
         )
 
-        # Merge both sources
-        all_documents = papers + github_docs
+        # Step 1c — Ingest from Hacker News
+        hn_docs = fetch_hn_stories(
+            topic=topic,
+            frequency=tracker["frequency"],
+        )
+
+        # Merge all sources
+        all_documents = papers + github_docs + hn_docs
 
         if all_documents:
             chunks = process_documents(all_documents)
