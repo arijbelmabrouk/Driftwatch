@@ -43,8 +43,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Use absolute path so daemon works regardless of where it's launched from
-REPORTS_DIR  = Path(__file__).parent.parent / "data" / "reports"
+REPORTS_DIR = Path(__file__).parent.parent / "data" / "reports"
 
 FREQUENCY_DAYS = {
     "daily":    1,
@@ -88,35 +87,41 @@ def _build_arxiv_query(topic: str) -> str:
     return f'cat:cs.LG AND abs:"{topic.strip().lower()}"'
 
 
-def run_pipeline(tracker: dict, user: dict):
+def run_pipeline(tracker: dict, user: dict | None = None):
     tracker_id  = tracker["id"]
     topic       = tracker["topic"]
     report_mode = tracker.get("report_mode", "both")
 
+    if user is None:
+        user = database.get_user_by_id(tracker.get("user_id")) or {}
+
     log.info(f"Starting pipeline for: '{topic}'")
     update_tracker(tracker, "running")
-    generated_reports = []
+
+    generated_reports    = []
+    summary_text_for_email = ""
+    delta_text_for_email   = ""
 
     try:
-        # Step 1 — Fetch everything ArXiv returns, no artificial limit
+        # Step 1 — Fetch from ArXiv
         query      = _build_arxiv_query(topic)
         week_label = get_period_label(tracker.get("frequency", "weekly"))
-        papers = fetch_papers(topic=query, frequency=tracker.get("frequency", "weekly"))
+        papers     = fetch_papers(topic=query, frequency=tracker.get("frequency", "weekly"))
         log.info(f"Fetched {len(papers)} ArXiv papers.")
 
-        # Step 1b — Fetch GitHub repos for same topic
+        # Step 1b — Fetch from GitHub
         github_docs = fetch_github_repos(
             topic=topic,
             frequency=tracker.get("frequency", "weekly"),
         )
         log.info(f"Fetched {len(github_docs)} GitHub repos.")
 
-        # Step 1c — Fetch Hacker News stories for same topic
+        # Step 1c — Fetch from HackerNews
         hn_docs = fetch_hn_stories(
             topic=topic,
             frequency=tracker.get("frequency", "weekly"),
         )
-        log.info(f"Fetched {len(hn_docs)} Hacker News stories.")
+        log.info(f"Fetched {len(hn_docs)} HackerNews stories.")
 
         # Merge all sources
         all_documents = papers + github_docs + hn_docs
@@ -141,10 +146,16 @@ def run_pipeline(tracker: dict, user: dict):
                 messages = build_messages(topic, week_label, retrieved)
                 summary  = generate_report(messages)
 
-                report_dir = save_summary(topic=topic, week_current=week_label, report_text=summary, chunks=retrieved)
+                report_dir = save_summary(
+                    topic=topic,
+                    week_current=week_label,
+                    report_text=summary,
+                    chunks=retrieved
+                )
                 generated_reports.append(report_dir)
+                summary_text_for_email = summary
                 log.info("Summary report saved.")
-                time.sleep(3)  # avoid Groq 429 when both summary and delta run back to back
+                time.sleep(3)  # avoid Groq 429 back-to-back
 
         # Step 5 — Delta report
         if report_mode in ("delta", "both"):
@@ -156,6 +167,7 @@ def run_pipeline(tracker: dict, user: dict):
             if delta_context.get("has_data"):
                 messages     = build_delta_messages(delta_context)
                 delta_report = generate_report(messages)
+
                 report_dir = save_report(
                     topic=topic,
                     week_current=delta_context["week_current"],
@@ -164,6 +176,7 @@ def run_pipeline(tracker: dict, user: dict):
                     context=delta_context
                 )
                 generated_reports.append(report_dir)
+                delta_text_for_email = delta_report
                 log.info("Delta report saved.")
             else:
                 log.info("Not enough period data for delta yet — skipping.")
@@ -174,20 +187,34 @@ def run_pipeline(tracker: dict, user: dict):
         return
 
     update_tracker(tracker, "idle", datetime.datetime.now().isoformat())
+    log.info(f"Pipeline complete for: '{topic}'")
 
-    if generated_reports:
+    # ── Send email with full report content ───────────────────────────────────
+    if generated_reports and user.get("email"):
         try:
+            email_parts = []
+
+            if summary_text_for_email:
+                email_parts.append(
+                    f"SUMMARY REPORT\n{'=' * 50}\n{summary_text_for_email}"
+                )
+
+            if delta_text_for_email:
+                email_parts.append(
+                    f"DELTA REPORT\n{'=' * 50}\n{delta_text_for_email}"
+                )
+
+            full_report_text = "\n\n".join(email_parts) if email_parts else "Report generated — open the dashboard to view."
+
             send_report_email(
-                recipient=user.get("email"),
+                recipient=user["email"],
                 topic=topic,
                 report_paths=generated_reports,
-                report_text="A new Driftwatch report was generated for this tracker.",
+                report_text=full_report_text,
             )
-            log.info(f"Report email sent to {user.get('email', 'unknown')}.")
+            log.info(f"Report email sent to {user['email']}.")
         except Exception as exc:
             log.warning(f"Could not send report email for '{topic}': {exc}")
-
-    log.info(f"Pipeline complete for: '{topic}'")
 
 
 def check_and_run():
@@ -208,13 +235,13 @@ def check_and_run():
         return
 
     for user in users:
-        user_id = user["id"]
+        user_id  = user["id"]
         trackers = load_all_trackers_for_user(user_id)
         if not trackers:
             continue
 
         due = [t for t in trackers if should_run(t)]
-        log.info(f"User {user.get('email', user_id)}: {len(trackers)} tracker(s) total — {len(due)} due.")
+        log.info(f"User {user.get('email', user_id)}: {len(trackers)} tracker(s) — {len(due)} due.")
 
         for tracker in due:
             run_pipeline(tracker, user)
@@ -225,9 +252,9 @@ def main():
 
     scheduler = BlockingScheduler()
     scheduler.add_job(
-        check_and_run, 
-        trigger="interval", 
-        hours=1, 
+        check_and_run,
+        trigger="interval",
+        hours=1,
         id="check_trackers"
     )
 

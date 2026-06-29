@@ -14,17 +14,18 @@ The real danger isn't the papers you read and disagree with. It's the ones you n
 
 **Pull tools** (search engines, chatbots, literature databases) only help when you already know what to look for. They can't catch what you didn't know to ask.
 
-**Driftwatch is a push tool.** You register a topic once. It watches forever. At your chosen frequency it delivers one report: *what actually changed.*
+**Driftwatch is a push tool.** You register a topic once. It watches forever. At your chosen frequency it delivers one report: *what actually changed* — straight to your inbox.
 
 ---
 
 ## How It Works
 
-1. **Register a tracker** — describe your topic in plain language. Driftwatch auto-formats it into precise queries for each source behind the scenes. No query syntax required.
-2. **Choose your frequency** — daily, weekly, biweekly, or monthly. Each tracker runs on its own schedule. The daemon checks every hour and runs any tracker that is due.
-3. **Choose your report mode** — summary (what's happening this period), delta (what changed since last period), or both.
-4. **It runs autonomously** — the background daemon ingests new papers from ArXiv and repos from GitHub, chunks and embeds them, and stores them in a local vector database stamped with that period's identifier. No manual input required after setup.
-5. **You get a report** — grounded in real sources from multiple platforms, saved to disk, never hallucinated. Every source is listed as a clickable bibliography at the bottom of the report.
+1. **Create an account** — register with your email. Driftwatch is a multi-user platform. Every tracker and report is scoped to your account.
+2. **Register a tracker** — describe your topic in plain language. Driftwatch auto-formats it into precise queries for each source behind the scenes. No query syntax required.
+3. **Choose your frequency** — daily, weekly, biweekly, or monthly. Each tracker runs on its own schedule. The daemon checks every hour and runs any tracker that is due.
+4. **Choose your report mode** — summary (what's happening this period), delta (what changed since last period), or both.
+5. **It runs autonomously** — the background daemon ingests new content from ArXiv, GitHub, and HackerNews, chunks and embeds everything, and stores it in a local vector database stamped with that period's identifier. No manual input required after setup.
+6. **You get a report** — delivered to your inbox automatically. Full report text in the email body — no clicking through to a dashboard required. The dashboard is also available for browsing history and asking follow-up questions.
 
 ---
 
@@ -41,7 +42,8 @@ Every individual piece of this system exists somewhere. The combination doesn't.
 | Persistent memory across periods | no |
 | Delta report — what changed vs last period | no |
 | Push-based, zero user input after setup | no |
-| Cross-disciplinary collision detection | no |
+| Full report delivered to inbox automatically | no |
+| Multi-user platform with per-account tracker isolation | no |
 | Clickable bibliography per report | no |
 
 The combination is the innovation.
@@ -51,7 +53,7 @@ The combination is the innovation.
 ## Report Types
 
 ### Summary
-Answers: *"what are papers and repos saying about X this period?"*
+Answers: *"what are papers, repos, and discussions saying about X this period?"*
 
 Four sections: MAIN THEME · NOTABLE FINDINGS · CONTESTED · OPEN GAP
 
@@ -62,19 +64,22 @@ Four sections: NEW THIS WEEK · STILL ACTIVE · FADING OUT · EMERGING DISPUTE
 
 The delta report is what makes Driftwatch unique. It requires at least two periods of stored data and uses set comparison across ChromaDB to categorize every source as new, continuing, or dropped — before passing that structured context to the LLM.
 
-Each report ends with a **Sources** section — every ArXiv paper and GitHub repo that informed the report, tagged by source type and linking directly to the original.
+Each report ends with a **Sources** section — every ArXiv paper, GitHub repo, and HackerNews thread that informed the report, tagged by source type and linking directly to the original.
 
 ---
 
 ## Architecture
 
 ```
-User types plain topic + chooses frequency + chooses report mode
+User registers → logs in → creates tracker (topic + frequency + mode)
         ↓
-        ├── ArXiv API → papers (title, abstract, url, authors)
-        └── GitHub API → repos (name, description, README, stars)
+Daemon checks every hour → finds due trackers per user
         ↓
-Merge all documents from both sources
+        ├── ArXiv API    → papers (title, abstract, url, authors)
+        ├── GitHub API   → repos (name, description, README, stars)
+        └── HackerNews   → stories + top comments (Algolia Search API)
+        ↓
+Merge all documents from all three sources
         ↓
 RecursiveCharacterTextSplitter → chunks (~500 chars, 50 overlap)
         ↓
@@ -88,11 +93,8 @@ ChromaDB (persistent, cosine similarity) ← stamped with period identifier + so
                             → Groq LLM → delta report
                             → saved to disk (JSON + .txt) with sources list
         ↓
-FastAPI backend → React dashboard (summary + delta + clickable bibliography)
-
-Background daemon (APScheduler):
-    checks every hour → runs any tracker due based on its frequency
-    → fires pipeline automatically → report ready when you open the dashboard
+        ├── FastAPI backend → React dashboard (summary + delta + clickable bibliography)
+        └── Gmail SMTP → full report emailed to user's registered address
 ```
 
 Everything runs locally. No cloud database. No paid APIs. No subscription.
@@ -171,9 +173,46 @@ The reasoning section is the most important — it tells the LLM to think throug
 
 **ArXiv API** — academic papers. Free, no key required, structured data. Query format: `cat:cs.LG AND abs:"topic"`. Every paper is stamped with the tracker's period identifier and `source: arxiv`.
 
-**GitHub API** — trending repos. Requires a free token (no scopes needed). Searches repo name and description with `stars:>100` quality filter. Fetches README content truncated to 1,500 characters. Every repo is stamped with the same period identifier and `source: github`. Single source of truth for period labels — both fetchers import period helpers from `arxiv_fetcher.py` to guarantee identical stamps in ChromaDB.
+**GitHub API** — trending repos. Requires a free token (no scopes needed). Searches repo name and description with `stars:>100` quality filter. Fetches README content truncated to 1,500 characters. Every repo is stamped with the same period identifier and `source: github`.
 
-Query design is kept separate per fetcher (Option A) — ArXiv and GitHub have different query syntaxes and different search semantics. Each fetcher owns its own query logic internally.
+**HackerNews** — community discussions. Uses the official Algolia HN Search API (free, no key required). Searches stories matching the topic within the current period using Unix timestamp filters. Fetches story title, self-text, and top 5 comments per story for rich discussion signal. Every story is stamped with the same period identifier and `source: hn`.
+
+All three fetchers share a single source of truth for period label calculation — `github_fetcher` and `hn_fetcher` both import period helpers from `arxiv_fetcher.py` to guarantee identical stamps across all sources in ChromaDB.
+
+Query design is kept separate per fetcher — ArXiv, GitHub, and HackerNews have different query syntaxes and different search semantics. Each fetcher owns its own query logic internally.
+
+---
+
+### Authentication — JWT + SQLite
+
+**User model:** Email + hashed password stored in a local SQLite database (`data/driftwatch.db`). Password hashing uses PBKDF2-HMAC-SHA256 with a random salt — no external auth library required.
+
+**Tokens:** Pure Python JWT implementation using HMAC-SHA256. Tokens expire after 24 hours (configurable via `JWT_EXPIRATION_SECONDS` in `.env`). The secret key is set via `JWT_SECRET` in `.env`.
+
+**Why not a third-party auth library?** The auth requirements are simple — email/password login, JWT tokens, no OAuth. A pure Python implementation is smaller, has no external dependencies, and is fully auditable.
+
+**Multi-user isolation:** Every tracker is stored with a `user_id` foreign key. All API endpoints verify the JWT and filter data by the authenticated user. Users can only see, run, and delete their own trackers.
+
+---
+
+### Email Delivery — Gmail SMTP
+
+Reports are delivered automatically to the user's registered email address after every pipeline run. No manual action required.
+
+**Delivery:** Python's built-in `smtplib` with STARTTLS on port 587. Gmail app password stored in `.env` — your real Gmail password is never used.
+
+**Email content:** Full report text in the plain-text body — summary and delta sections separated by clear headers. No HTML, no click-through required. The entire intelligence is in the email.
+
+**Recipient:** The user's registered account email. Not a global config — each user receives reports only for their own trackers.
+
+**Sender credentials** stored in `.env`:
+```
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USE_TLS=true
+GMAIL_SENDER_EMAIL=your-sender@gmail.com
+GMAIL_SENDER_PASSWORD=your-app-password
+```
 
 ---
 
@@ -206,21 +245,25 @@ Reports are saved to disk as both JSON (for the dashboard) and `.txt` (for human
 
 ### Scheduler Daemon — APScheduler
 
-`scheduler/daemon.py` runs as a background process. On start it runs an immediate check, then checks every hour. For each tracker it evaluates whether enough time has passed since the last run based on the tracker's frequency. If due, it runs the full pipeline — fetch from all sources, chunk, embed, store, generate reports, save to disk.
+`scheduler/daemon.py` runs as a background process. On start it runs an immediate check, then checks every hour. It queries the SQLite database for all users, then for each user loads their trackers and runs any that are due.
 
-The daemon is independent of the FastAPI server and the dashboard. It works whether or not the browser is open. When a new tracker is created from the dashboard, the API also fires the pipeline immediately in a background thread — so the first report is ready within minutes of creation.
+After each successful pipeline run, the daemon:
+1. Saves the report to disk (JSON + .txt)
+2. Emails the full report to the user's registered address via Gmail SMTP
+
+The daemon is independent of the FastAPI server and the dashboard. When a new tracker is created from the dashboard, the API also fires the pipeline immediately in a background thread.
 
 ---
 
-### Backend — FastAPI
+### Backend — FastAPI + SQLite
 
-Thin API layer between the React dashboard and the Python pipeline. Endpoints now include authentication, user registration/login, and user-scoped tracker access. Tracker configuration is persisted in a local SQLite database via `data/driftwatch.db`, which also supports future multi-user expansion.
+Authentication endpoints (`/auth/register`, `/auth/login`, `/auth/me`) handle user creation and JWT issuance. All tracker endpoints require a valid Bearer token and return only data belonging to the authenticated user. Tracker configuration is persisted in `data/driftwatch.db`.
 
 ---
 
 ### Frontend — React + Vite
 
-Single-page dashboard. Tracker cards grid, report panel showing both summary and delta when mode is "both", clickable sources bibliography per report with arxiv/github tags, ask bar scoped to the selected report. All API calls centralized in `api.js`. Dark theme.
+Single-page dashboard with a login/register screen before the main view. After authentication the JWT is stored in `localStorage` and included in all API requests automatically. The dashboard shows tracker cards, summary and delta reports, a clickable sources bibliography, and an ask bar for follow-up questions scoped to the current report.
 
 ---
 
@@ -229,9 +272,12 @@ Single-page dashboard. Tracker cards grid, report panel showing both summary and
 ```
 Driftwatch/
 ├── main.py                        ← interactive entry point, mode selection
+├── auth.py                        ← password hashing + JWT token helpers
+├── database.py                    ← SQLite schema, user + tracker persistence
 ├── ingestion/
 │   ├── arxiv_fetcher.py           ← fetches papers, frequency-aware period stamping
-│   └── github_fetcher.py          ← fetches repos, imports period helpers from arxiv_fetcher
+│   ├── github_fetcher.py          ← fetches repos, imports period helpers from arxiv_fetcher
+│   └── hn_fetcher.py              ← fetches HN stories via Algolia API
 ├── processing/
 │   └── chunker_embedder.py        ← recursive chunking + local embeddings
 ├── storage/
@@ -243,20 +289,27 @@ Driftwatch/
 │   ├── comparator.py              ← fetches two periods, set comparison logic
 │   ├── delta_prompt.py            ← assembles delta prompt (6-component structure)
 │   └── report.py                  ← saves summary + delta reports to disk as JSON with sources
+├── notifications/
+│   └── emailer.py                 ← Gmail SMTP delivery, builds and sends full report email
 ├── api/
-│   └── main.py                    ← FastAPI backend, auth endpoints + tracker APIs
-├── auth.py                        ← password hashing + JWT-style token helpers
-├── database.py                    ← SQLite schema and persistence helpers
+│   └── main.py                    ← FastAPI backend, auth + tracker endpoints
 ├── scheduler/
-│   └── daemon.py                  ← background daemon, hourly check, APScheduler
+│   └── daemon.py                  ← background daemon, per-user pipeline, email delivery
 ├── dashboard/                     ← React + Vite frontend
 │   └── src/
-│       ├── App.jsx                ← main app, state management
-│       ├── api.js                 ← all fetch() calls in one place
-│       └── components/            ← Sidebar, TrackerCard, ReportPanel, NewTrackerModal
+│       ├── App.jsx                ← main app, auth state, session restore
+│       ├── api.js                 ← all fetch() calls with automatic Bearer token
+│       └── components/
+│           ├── AuthScreen.jsx     ← login / register UI
+│           ├── Sidebar.jsx
+│           ├── TrackerCard.jsx
+│           ├── ReportPanel.jsx
+│           └── NewTrackerModal.jsx
 ├── scripts/
 │   ├── seed_week.py               ← dev utility: seed a fake previous period for testing
 │   └── migrate_trackers.py        ← migrates existing JSON trackers into SQLite
+├── tests/
+│   └── test_emailer.py            ← unit tests for email builder and SMTP settings
 ├── data/                          ← ChromaDB + saved reports + SQLite DB (gitignored)
 ├── requirements.txt
 └── .gitignore
@@ -270,17 +323,20 @@ Driftwatch/
 |---|---|---|
 | Ingestion — papers | ArXiv API | Free, no key, structured data |
 | Ingestion — repos | GitHub Search API | Free token, real adoption signal |
-| Chunking | LangChain RecursiveCharacterTextSplitter | Handles all source types — clean abstracts and messy READMEs |
+| Ingestion — discussions | HackerNews Algolia API | Free, no key, practitioner signal |
+| Chunking | LangChain RecursiveCharacterTextSplitter | Handles clean abstracts and messy READMEs |
 | Embeddings | sentence-transformers all-MiniLM-L6-v2 | Local, free, fast on CPU |
 | Vector store | ChromaDB (persistent, cosine) | Local, no server, Python-native |
 | LLM | Groq API — llama-3.1-8b-instant | Free, fast, 131k context |
 | Delta logic | Set comparison + structured prompting | Period N vs N-1, any frequency |
 | Report storage | JSON + .txt on disk | Persistent, dashboard-ready, includes sources list |
-| Scheduler | APScheduler | Hourly check, frequency-aware, zero manual input |
+| Email delivery | Gmail SMTP via smtplib | Full report in email body, zero click-through |
+| Auth | Pure Python JWT + PBKDF2 | No external auth library, fully auditable |
+| Persistence | SQLite via database.py | User + tracker storage, multi-user isolation |
+| Scheduler | APScheduler | Hourly check, frequency-aware, per-user |
 | Backend | FastAPI + uvicorn | Lightweight, async, auto-docs |
 | Frontend | React + Vite | Fast dev server, component-based |
 | Orchestration | LangGraph (upcoming) | Stateful multi-step agentic pipeline |
-| Data sources (upcoming) | HackerNews Firebase API | Free, practitioner signal |
 
 100% free and open source. No paid APIs required.
 
@@ -292,7 +348,6 @@ Driftwatch/
 - ArXiv fetcher with frequency-aware period stamping (daily / weekly / biweekly / monthly)
 - RecursiveCharacterTextSplitter + sentence-transformers embeddings
 - ChromaDB persistent storage with cosine similarity
-- Interactive `main.py` connecting all three
 
 **Phase 2 complete** — RAG layer
 - Groq LLM integration (llama-3.1-8b-instant)
@@ -314,23 +369,27 @@ Driftwatch/
 **Phase 5 complete** — Scheduler daemon + frequency-aware periods
 - APScheduler daemon running hourly checks
 - Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
-- Period labels adapt to frequency
 - Immediate pipeline run on tracker creation via background thread
 
 **Phase 6 complete** — GitHub ingestion + sources bibliography
-- GitHub Search API fetcher — repos matching topic by name/description, filtered by stars
-- README content fetched and truncated to meaningful signal
-- Single source of truth for period labels — github_fetcher imports from arxiv_fetcher
-- Both sources merged before chunking — same pipeline, same ChromaDB, same reports
-- Sources bibliography saved with every report — title, url, source type (arxiv/github)
-- Clickable bibliography rendered in dashboard with color-coded source tags
+- GitHub Search API fetcher with star filter and README truncation
+- Sources bibliography saved with every report and rendered in dashboard
+- Clickable bibliography with color-coded arxiv/github source tags
 
-**Phase 7 complete** — HackerNews ingestion + multi-source bibliography
-- HackerNews stories fetched through the Algolia Search API for the active topic and period
-- Story title, story text, and top comments are combined into rich document content
-- HackerNews items are merged into the same ingestion pipeline alongside ArXiv and GitHub
-- Period labels remain consistent by reusing the ArXiv period helpers
-- Sources bibliography now includes HackerNews entries with title, url, and source type
+**Phase 7 complete** — HackerNews ingestion
+- Algolia HN Search API — stories + top 5 comments per story
+- Merged into the same pipeline alongside ArXiv and GitHub
+- HN sources included in bibliography
+
+**Phase 8 complete** — Multi-user platform + email delivery
+- SQLite database with users and trackers tables
+- User registration and login with PBKDF2 password hashing
+- Pure Python JWT authentication — no external auth library
+- All API endpoints scoped to the authenticated user
+- React dashboard with login/register screen and session restore
+- Daemon loops per user — each user's trackers run independently
+- Gmail SMTP email delivery — full report text in email body after every pipeline run
+- Recipient email comes from user's registered account, not hardcoded config
 
 ---
 
@@ -346,16 +405,17 @@ Driftwatch/
 - [x] FastAPI backend
 - [x] React dashboard with tracker cards, report viewer, ask bar
 
-### V1 (Phases 5–8) — Automation + Multi-Source
+### V1 (Phases 5–8) — Automation + Multi-Source + Delivery
 - [x] Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
 - [x] APScheduler daemon (runs at user-chosen frequency, zero manual input)
 - [x] Immediate pipeline run on tracker creation
-- [x] GitHub trending repos ingestion (name/description search, README, star filter)
-- [x] Clickable sources bibliography per report (arxiv + github, color-coded)
+- [x] GitHub trending repos ingestion
 - [x] HackerNews discussions ingestion (Algolia API)
+- [x] Clickable sources bibliography per report
+- [x] Multi-user platform with SQLite + JWT auth
+- [x] Email delivery — full report to user's inbox after every run
 - [ ] Contradiction detection between papers
 - [ ] Instant alerts for CVEs and retractions
-- [ ] Email delivery of reports
 
 ### V1.5 (Phases 9–12) — Project-Aware Mode
 - [ ] VS Code extension — detects open project folder
@@ -388,15 +448,24 @@ Create a `.env` file at the project root:
 ```
 GROQ_API_KEY=your_groq_key_here
 GITHUB_TOKEN=your_github_token_here
+JWT_SECRET=pick-any-long-random-string
+
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USE_TLS=true
+GMAIL_SENDER_EMAIL=your-sender@gmail.com
+GMAIL_SENDER_PASSWORD=your-gmail-app-password
 ```
 
 Get a free Groq API key at [console.groq.com](https://console.groq.com) — no credit card required.
 
-Get a free GitHub token at [github.com/settings/tokens](https://github.com/settings/tokens) — no scopes needed, just generate and copy.
+Get a free GitHub token at [github.com/settings/tokens](https://github.com/settings/tokens) — no scopes needed.
+
+Get a Gmail app password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) — requires 2-Step Verification enabled.
 
 Start the backend:
 ```bash
-uvicorn api.main:app --reload --port 8000
+uvicorn api.main:app --reload --port 8000 --reload-exclude "venv"
 ```
 
 Start the dashboard (separate terminal):
@@ -406,12 +475,12 @@ npm install
 npm run dev
 ```
 
-Start the daemon (separate terminal — runs pipelines automatically):
+Start the daemon (separate terminal — runs pipelines and sends emails automatically):
 ```bash
 python scheduler/daemon.py
 ```
 
-Open `http://localhost:5173` in your browser.
+Open `http://localhost:5173`, register an account, and create your first tracker.
 
 ---
 

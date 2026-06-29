@@ -123,8 +123,13 @@ export default function App() {
             {loading ? (
               <div style={styles.gridEmpty}>Loading...</div>
             ) : trackers.length === 0 ? (
-              <div style={styles.gridEmpty}>
-                No trackers yet. Click "+ New tracker" to create one.
+              <div>
+                <div style={styles.gridEmpty}>
+                  No trackers yet. Create your first tracker to start receiving reports.
+                </div>
+                <button onClick={() => setShowModal(true)} style={styles.primaryActionBtn}>
+                  + Create your first tracker
+                </button>
               </div>
             ) : (
               <div style={styles.grid}>
@@ -256,5 +261,16 @@ const styles = {
     justifyContent: "center",
     minHeight: 80,
     transition: "border-color 0.15s, color 0.15s",
+  },
+  primaryActionBtn: {
+    background: "#6a5cff",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: 8,
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+    marginTop: 8,
   },
 };

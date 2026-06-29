@@ -40,7 +40,8 @@ database.init_db()
 
 def _run_pipeline_background(tracker: dict):
     from scheduler.daemon import run_pipeline
-    run_pipeline(tracker)
+    user = database.get_user_by_id(tracker.get("user_id"))
+    run_pipeline(tracker, user)
 
 
 app = FastAPI(title="Driftwatch API", version="1.0.0")
