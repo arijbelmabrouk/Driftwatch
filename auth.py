@@ -9,6 +9,7 @@ import hashlib
 from pathlib import Path
 from dotenv import load_dotenv
 
+
 load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 
 JWT_SECRET = os.getenv("JWT_SECRET", "driftwatch-default-secret").encode("utf-8")
