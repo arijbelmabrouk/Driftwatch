@@ -8,7 +8,6 @@ To start:
     python scheduler/daemon.py
 """
 
-import json
 import logging
 import re
 import datetime
@@ -19,6 +18,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from ingestion.github_fetcher import fetch_github_repos
 from ingestion.hn_fetcher import fetch_hn_stories
+import database
 
 from ingestion.arxiv_fetcher import (
     fetch_papers,
@@ -33,6 +33,7 @@ from delta.comparator import prepare_delta_context
 from delta.delta_prompt import build_delta_messages
 import time
 from delta.report import save_report, save_summary
+from notifications.emailer import send_report_email
 
 
 logging.basicConfig(
@@ -43,7 +44,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # Use absolute path so daemon works regardless of where it's launched from
-TRACKERS_DIR = Path(__file__).parent.parent / "data" / "trackers"
 REPORTS_DIR  = Path(__file__).parent.parent / "data" / "reports"
 
 FREQUENCY_DAYS = {
@@ -67,30 +67,15 @@ def should_run(tracker: dict) -> bool:
     return days_since >= days_required
 
 
-def load_all_trackers() -> list[dict]:
-    trackers = []
-    if not TRACKERS_DIR.exists():
-        return trackers
-    for path in TRACKERS_DIR.glob("*.json"):
-        try:
-            with open(path) as f:
-                trackers.append(json.load(f))
-        except Exception as e:
-            log.warning(f"Could not load {path.name}: {e}")
-    return trackers
+def load_all_trackers_for_user(user_id: str) -> list[dict]:
+    return database.list_trackers(user_id)
 
 
-def update_tracker(tracker_id: str, status: str, last_run: str = None):
-    path = TRACKERS_DIR / f"{tracker_id}.json"
-    if not path.exists():
-        return
-    with open(path) as f:
-        config = json.load(f)
-    config["status"] = status
+def update_tracker(tracker: dict, status: str, last_run: str = None):
+    tracker["status"] = status
     if last_run:
-        config["last_run"] = last_run
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
+        tracker["last_run"] = last_run
+    database.save_tracker(tracker)
 
 
 def _slugify(text: str) -> str:
@@ -103,13 +88,14 @@ def _build_arxiv_query(topic: str) -> str:
     return f'cat:cs.LG AND abs:"{topic.strip().lower()}"'
 
 
-def run_pipeline(tracker: dict):
+def run_pipeline(tracker: dict, user: dict):
     tracker_id  = tracker["id"]
     topic       = tracker["topic"]
     report_mode = tracker.get("report_mode", "both")
 
     log.info(f"Starting pipeline for: '{topic}'")
-    update_tracker(tracker_id, "running")
+    update_tracker(tracker, "running")
+    generated_reports = []
 
     try:
         # Step 1 — Fetch everything ArXiv returns, no artificial limit
@@ -137,7 +123,7 @@ def run_pipeline(tracker: dict):
 
         if not all_documents:
             log.warning(f"No data found for '{topic}' this period.")
-            update_tracker(tracker_id, "idle", datetime.datetime.now().isoformat())
+            update_tracker(tracker, "idle", datetime.datetime.now().isoformat())
             return
 
         # Step 2 — Chunk + embed
@@ -155,7 +141,8 @@ def run_pipeline(tracker: dict):
                 messages = build_messages(topic, week_label, retrieved)
                 summary  = generate_report(messages)
 
-                save_summary(topic=topic, week_current=week_label, report_text=summary, chunks=retrieved)
+                report_dir = save_summary(topic=topic, week_current=week_label, report_text=summary, chunks=retrieved)
+                generated_reports.append(report_dir)
                 log.info("Summary report saved.")
                 time.sleep(3)  # avoid Groq 429 when both summary and delta run back to back
 
@@ -169,39 +156,68 @@ def run_pipeline(tracker: dict):
             if delta_context.get("has_data"):
                 messages     = build_delta_messages(delta_context)
                 delta_report = generate_report(messages)
-                save_report(
+                report_dir = save_report(
                     topic=topic,
                     week_current=delta_context["week_current"],
                     week_previous=delta_context["week_previous"],
                     report_text=delta_report,
                     context=delta_context
                 )
+                generated_reports.append(report_dir)
                 log.info("Delta report saved.")
             else:
                 log.info("Not enough period data for delta yet — skipping.")
 
     except Exception as e:
         log.error(f"Pipeline failed for '{topic}': {e}")
-        update_tracker(tracker_id, "error", datetime.datetime.now().isoformat())
+        update_tracker(tracker, "error", datetime.datetime.now().isoformat())
         return
 
-    update_tracker(tracker_id, "idle", datetime.datetime.now().isoformat())
+    update_tracker(tracker, "idle", datetime.datetime.now().isoformat())
+
+    if generated_reports:
+        try:
+            send_report_email(
+                recipient=user.get("email"),
+                topic=topic,
+                report_paths=generated_reports,
+                report_text="A new Driftwatch report was generated for this tracker.",
+            )
+            log.info(f"Report email sent to {user.get('email', 'unknown')}.")
+        except Exception as exc:
+            log.warning(f"Could not send report email for '{topic}': {exc}")
+
     log.info(f"Pipeline complete for: '{topic}'")
 
 
 def check_and_run():
     log.info("Checking trackers...")
-    trackers = load_all_trackers()
+    database.init_db()
 
-    if not trackers:
-        log.info("No trackers found.")
+    users = []
+    try:
+        with database.connect() as conn:
+            rows = conn.execute("SELECT id, email FROM users").fetchall()
+            users = [dict(row) for row in rows]
+    except Exception as exc:
+        log.warning(f"Could not load users from DB: {exc}")
         return
 
-    due = [t for t in trackers if should_run(t)]
-    log.info(f"{len(trackers)} tracker(s) total — {len(due)} due.")
+    if not users:
+        log.info("No users found.")
+        return
 
-    for tracker in due:
-        run_pipeline(tracker)
+    for user in users:
+        user_id = user["id"]
+        trackers = load_all_trackers_for_user(user_id)
+        if not trackers:
+            continue
+
+        due = [t for t in trackers if should_run(t)]
+        log.info(f"User {user.get('email', user_id)}: {len(trackers)} tracker(s) total — {len(due)} due.")
+
+        for tracker in due:
+            run_pipeline(tracker, user)
 
 
 def main():
