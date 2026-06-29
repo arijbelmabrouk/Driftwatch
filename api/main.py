@@ -326,12 +326,6 @@ def get_latest_report(tracker_id: str, current_user=Depends(get_current_user)):
     summary = load_summary(topic, week_current)
     delta   = load_report(topic, week_current, week_previous)
 
-    if not summary and not delta:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No reports found for {week_current}. Run the tracker first."
-        )
-
     return {
         "tracker_id": tracker_id,
         "summary":    summary,

@@ -91,11 +91,8 @@ export async function runTracker(trackerId) {
 export async function getLatestReport(trackerId) {
   try {
     return await request(`/trackers/${trackerId}/report`);
-  } catch (error) {
-    if (error.message === "No reports found for this period. Run the tracker first.") {
-      return null;
-    }
-    throw error;
+  } catch {
+    return null;
   }
 }
 
