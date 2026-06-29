@@ -214,7 +214,7 @@ The daemon is independent of the FastAPI server and the dashboard. It works whet
 
 ### Backend — FastAPI
 
-Thin API layer between the React dashboard and the Python pipeline. Endpoints: list trackers, create tracker, run tracker manually, get latest reports (returns both summary and delta with sources), ask a question scoped to a report. Tracker configs stored as JSON files in `data/trackers/`. No database required.
+Thin API layer between the React dashboard and the Python pipeline. Endpoints now include authentication, user registration/login, and user-scoped tracker access. Tracker configuration is persisted in a local SQLite database via `data/driftwatch.db`, which also supports future multi-user expansion.
 
 ---
 
@@ -244,7 +244,9 @@ Driftwatch/
 │   ├── delta_prompt.py            ← assembles delta prompt (6-component structure)
 │   └── report.py                  ← saves summary + delta reports to disk as JSON with sources
 ├── api/
-│   └── main.py                    ← FastAPI backend, all endpoints
+│   └── main.py                    ← FastAPI backend, auth endpoints + tracker APIs
+├── auth.py                        ← password hashing + JWT-style token helpers
+├── database.py                    ← SQLite schema and persistence helpers
 ├── scheduler/
 │   └── daemon.py                  ← background daemon, hourly check, APScheduler
 ├── dashboard/                     ← React + Vite frontend
@@ -253,8 +255,9 @@ Driftwatch/
 │       ├── api.js                 ← all fetch() calls in one place
 │       └── components/            ← Sidebar, TrackerCard, ReportPanel, NewTrackerModal
 ├── scripts/
-│   └── seed_week.py               ← dev utility: seed a fake previous period for testing
-├── data/                          ← ChromaDB + saved reports (gitignored)
+│   ├── seed_week.py               ← dev utility: seed a fake previous period for testing
+│   └── migrate_trackers.py        ← migrates existing JSON trackers into SQLite
+├── data/                          ← ChromaDB + saved reports + SQLite DB (gitignored)
 ├── requirements.txt
 └── .gitignore
 ```

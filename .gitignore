@@ -19,6 +19,7 @@ env/
 .env
 .env.local
 *.env
+!.env.example
 
 # ChromaDB — local vector store, never commit
 data/
