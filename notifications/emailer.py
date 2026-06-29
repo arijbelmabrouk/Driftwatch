@@ -16,12 +16,18 @@ def _get_bool(value: str | None, default: bool = False) -> bool:
 
 
 def get_smtp_settings() -> dict:
+    host = os.getenv("SMTP_SERVER", os.getenv("SMTP_HOST", "")).strip()
+    port = os.getenv("SMTP_PORT", "587")
+    username = os.getenv("GMAIL_SENDER_EMAIL", os.getenv("SMTP_USERNAME", os.getenv("SMTP_FROM", ""))).strip()
+    password = os.getenv("GMAIL_SENDER_PASSWORD", os.getenv("SMTP_PASSWORD", "")).strip()
+    from_addr = os.getenv("GMAIL_SENDER_EMAIL", os.getenv("SMTP_FROM", username)).strip()
+
     return {
-        "host": os.getenv("SMTP_HOST", "").strip(),
-        "port": int(os.getenv("SMTP_PORT", "587")),
-        "username": os.getenv("SMTP_USERNAME", "").strip(),
-        "password": os.getenv("SMTP_PASSWORD", "").strip(),
-        "from_addr": os.getenv("SMTP_FROM", os.getenv("SMTP_USERNAME", "")).strip(),
+        "host": host,
+        "port": int(port),
+        "username": username,
+        "password": password,
+        "from_addr": from_addr,
         "use_tls": _get_bool(os.getenv("SMTP_USE_TLS"), default=True),
     }
 
