@@ -336,7 +336,6 @@ Driftwatch/
 | Scheduler | APScheduler | Hourly check, frequency-aware, per-user |
 | Backend | FastAPI + uvicorn | Lightweight, async, auto-docs |
 | Frontend | React + Vite | Fast dev server, component-based |
-| Orchestration | LangGraph (upcoming) | Stateful multi-step agentic pipeline |
 
 100% free and open source. No paid APIs required.
 
@@ -393,43 +392,27 @@ Driftwatch/
 
 ---
 
-## Roadmap
+## Project Complete
 
-### MVP (Phases 1–4) — Core Loop
-- [x] ArXiv ingestion pipeline with period stamping
-- [x] Recursive chunking + local embeddings into ChromaDB
-- [x] RAG layer — Groq LLM, summary report generation
-- [x] Delta comparison logic — what changed between periods
-- [x] LLM-generated delta report with temporal movement framing
-- [x] Report persistence to disk
-- [x] FastAPI backend
-- [x] React dashboard with tracker cards, report viewer, ask bar
+Driftwatch is feature-complete as of Phase 8. The full MVP and V1 core loop are implemented and working end to end: multi-source ingestion (ArXiv, GitHub, HackerNews), delta-based reporting, a multi-user platform with authentication, an autonomous scheduler, and automatic email delivery.
 
-### V1 (Phases 5–8) — Automation + Multi-Source + Delivery
-- [x] Per-tracker configurable frequency (daily / weekly / biweekly / monthly)
-- [x] APScheduler daemon (runs at user-chosen frequency, zero manual input)
-- [x] Immediate pipeline run on tracker creation
-- [x] GitHub trending repos ingestion
-- [x] HackerNews discussions ingestion (Algolia API)
-- [x] Clickable sources bibliography per report
-- [x] Multi-user platform with SQLite + JWT auth
-- [x] Email delivery — full report to user's inbox after every run
-- [ ] Contradiction detection between papers
-- [ ] Instant alerts for CVEs and retractions
+Two items remain unbuilt and are intentionally left for future work rather than the current scope: contradiction detection between papers, and instant alerts for CVEs and retractions. Both are extensions on top of an already-functioning system, not foundational gaps.
 
-### V1.5 (Phases 9–12) — Project-Aware Mode
-- [ ] VS Code extension — detects open project folder
-- [ ] Auto-extract stack from requirements.txt / package.json / README
-- [ ] Confirmation prompt before auto-creating tracker
-- [ ] Recommendations scoped to your exact project context
-- [ ] Alert when a dependency has a relevant update or vulnerability
-- [ ] Local background daemon (auto-starts on machine boot)
+Ideas for further development — project-aware tracking via a VS Code extension, cross-disciplinary collision alerts, a knowledge graph for contradiction mapping — are documented below for reference, but are not part of the current build.
 
-### V2 (Beyond) — Intelligence Layer
-- [ ] Cross-disciplinary collision alerts (technique jumps between fields)
-- [ ] Innovation velocity tracking (adoption curves, hype vs production signal)
-- [ ] Neo4j knowledge graph for contradiction mapping
-- [ ] Multi-tracker dashboard with per-tracker velocity charts
+---
+
+## Possible Future Directions
+
+These were considered during planning and are documented for context. None are implemented.
+
+- Contradiction detection between papers
+- Instant alerts for CVEs and retractions
+- VS Code extension — auto-create a tracker from an open project's stack
+- Cross-disciplinary collision alerts (a technique jumping fields)
+- Innovation velocity tracking (adoption curves, hype vs production signal)
+- Neo4j knowledge graph for contradiction mapping
+- Per-tracker velocity charts on the dashboard
 
 ---
 
